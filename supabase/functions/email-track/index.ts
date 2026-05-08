@@ -78,6 +78,16 @@ serve(async (req) => {
       }).then(({ error }) => {
         if (error) console.error("Open event error:", error.message);
       });
+      // AI memory: append interaction to lead_memory (Phase 2.1 writer).
+      // Fire-and-forget — failures cannot break email tracking.
+      supabaseAdmin.rpc("log_lead_memory_email_event", {
+        p_message_id: messageId,
+        p_event_type: "open",
+        p_is_bot: isBot,
+        p_is_apple_privacy: isApplePrivacy,
+      }).then(({ error }) => {
+        if (error) console.warn("Open memory write skipped:", error.message);
+      });
     }
 
     return new Response(PIXEL_PNG, {
@@ -126,6 +136,17 @@ serve(async (req) => {
         p_is_apple_privacy: isApplePrivacy,
       }).then(({ error }) => {
         if (error) console.error("Click event error:", error.message);
+      });
+      // AI memory: clicks are a stronger signal than opens. Fire-and-forget.
+      supabaseAdmin.rpc("log_lead_memory_email_event", {
+        p_message_id: link.message_id,
+        p_event_type: "click",
+        p_link_id: linkId,
+        p_destination_url: link.destination_url,
+        p_is_bot: isBot,
+        p_is_apple_privacy: isApplePrivacy,
+      }).then(({ error }) => {
+        if (error) console.warn("Click memory write skipped:", error.message);
       });
     }
 

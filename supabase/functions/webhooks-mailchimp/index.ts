@@ -165,6 +165,18 @@ serve(async (req) => {
 
     if (error) {
       console.error("Mailchimp event recording error:", error.message);
+    } else {
+      // AI memory: append the interaction to lead_memory. Fire-and-forget.
+      supabaseAdmin.rpc("log_lead_memory_email_event", {
+        p_message_id: message.id,
+        p_event_type: mappedType,
+        p_link_id: linkId,
+        p_destination_url: clickUrl ?? null,
+        p_is_bot: false,
+        p_is_apple_privacy: false,
+      }).then(({ error: memErr }) => {
+        if (memErr) console.warn("Mailchimp memory write skipped:", memErr.message);
+      });
     }
 
     return new Response(JSON.stringify({ status: "processed" }), {

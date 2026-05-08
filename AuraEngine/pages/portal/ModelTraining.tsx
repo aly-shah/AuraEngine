@@ -8,6 +8,7 @@ import {
   GitBranchIcon, ZapIcon, RocketIcon, PenIcon, SendIcon, FilterIcon
 } from '../../components/Icons';
 import { supabase } from '../../lib/supabase';
+import { AI_MODELS } from '../../lib/aiConfig';
 import { PROMPT_REGISTRY, CATEGORY_META, type PromptCategory, type PromptRegistryEntry } from '../../lib/promptResolver';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { AdvancedOnly } from '../../components/ui-mode';
@@ -398,13 +399,8 @@ const ModelTraining: React.FC = () => {
     const start = Date.now();
 
     try {
-      const { GoogleGenAI } = await import('@google/genai');
-      const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || process.env.API_KEY;
-      if (!apiKey) {
-        setTestOutput('Error: No Gemini API key configured. Set VITE_GEMINI_API_KEY in your .env.local file.');
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey });
+      const { getGeminiClient } = await import('../../lib/geminiClient');
+      const ai = getGeminiClient();
 
       const samplePrompt = editPromptTemplate
         .replace(/\{\{[^}]+\}\}/g, (match) => {
@@ -425,7 +421,7 @@ const ModelTraining: React.FC = () => {
         });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: AI_MODELS.textTesting,
         contents: samplePrompt,
         config: {
           systemInstruction: editSystemInstruction,

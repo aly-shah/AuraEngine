@@ -1,11 +1,11 @@
 /**
  * Image Generation — Client API
  *
- * Uses Google Imagen 4 (via @google/genai SDK) for real image generation.
- * Falls back to SVG placeholders if the API call fails.
+ * Uses Google Imagen 4 via the `gemini-proxy` Edge Function (GEMINI_API_KEY
+ * lives there, not in the client bundle).
  */
 
-import { GoogleGenAI } from '@google/genai';
+import { getGeminiClient } from './geminiClient';
 import { buildImagePrompt } from './imagePromptBuilder';
 import type {
   ImageGenRequest,
@@ -37,7 +37,7 @@ export async function generateImages(req: ImageGenRequest): Promise<ImageGenResp
   const count = Math.max(1, Math.min(4, req.n));
   const aspectRatio = IMAGEN_ASPECT_RATIO[req.aspectRatio] || '1:1';
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const response = await ai.models.generateImages({
     model: 'imagen-4.0-generate-001',

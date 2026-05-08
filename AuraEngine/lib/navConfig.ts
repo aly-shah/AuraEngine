@@ -1,17 +1,24 @@
 import React from 'react';
 import {
-  Target, Users, Brain, Compass, Sparkles, PenSquare, GitBranch,
-  Send, PieChart, MessageSquare, Zap, Plug, Mail,
+  Compass, Users, Send, GitBranch, BarChart3, Brain,
+  Sparkles, PenSquare, MessageSquare, Plug, Mail,
   SlidersHorizontal, CreditCard, FileText, Settings, BookOpen,
-  HelpCircle,
+  HelpCircle, Zap, Target,
 } from 'lucide-react';
 
 // ── Types ──
+//
+// Navigation is grouped into 4 product pillars (ACQUIRE / ENGAGE / CONVERT /
+// INTELLIGENCE) plus a workspace/billing/settings shelf. The pillar split is
+// the product surface customers see; the shelf is plumbing.
 
 export type NavSection =
-  | 'primary'
-  | 'tools'
-  | 'workspace'
+  | 'mission'        // top-level: AI Mission Control
+  | 'acquire'        // pillar 1: lead acquisition
+  | 'engage'         // pillar 2: outreach
+  | 'convert'        // pillar 3: pipeline + ops
+  | 'intelligence'   // pillar 4: analytics + AI
+  | 'workspace'      // settings shelf
   | 'billing'
   | 'settings';
 
@@ -40,32 +47,66 @@ export interface NavConfigItem {
   simplifiedVisible?: boolean;
 }
 
+/**
+ * Pillar metadata — shown as section headers in the sidebar and used by
+ * Mission Control to render pillar-scoped action cards.
+ */
+export const PILLARS = {
+  acquire: {
+    key: 'acquire' as const,
+    label: 'Acquire',
+    description: 'Find, enrich, and qualify the right leads.',
+    icon: Compass,
+  },
+  engage: {
+    key: 'engage' as const,
+    label: 'Engage',
+    description: 'Reach prospects with email, social, and AI messaging.',
+    icon: Send,
+  },
+  convert: {
+    key: 'convert' as const,
+    label: 'Convert',
+    description: 'Move pipeline to revenue with tasks, proposals, invoicing.',
+    icon: Target,
+  },
+  intelligence: {
+    key: 'intelligence' as const,
+    label: 'Intelligence',
+    description: 'Analytics, forecasts, and the AI Command Center.',
+    icon: Brain,
+  },
+} as const;
+
 // ── Config ──
 
 export const NAV_CONFIG: NavConfigItem[] = [
-  // ── Primary ──
+  // ── Mission Control ──
   {
     route: '/portal',
-    navLabel: 'Home',
-    pageTitle: 'Home',
-    icon: Target,
-    section: 'primary',
+    navLabel: 'Mission Control',
+    pageTitle: 'Mission Control',
+    icon: Sparkles,
+    section: 'mission',
     order: 0,
   },
+
+  // ── Pillar 1 — ACQUIRE ──
   {
     route: '/portal/leads',
     navLabel: 'Leads',
     pageTitle: 'Leads',
     icon: Users,
-    section: 'primary',
-    order: 1,
+    section: 'acquire',
+    order: 0,
+    divider: true,
     children: [
       {
         route: '/portal/leads/apollo',
         navLabel: 'Find Prospects',
         pageTitle: 'Find Prospects',
         icon: Compass,
-        section: 'primary',
+        section: 'acquire',
         order: 0,
       },
       {
@@ -73,25 +114,28 @@ export const NAV_CONFIG: NavConfigItem[] = [
         navLabel: 'Lead Insights',
         pageTitle: 'Lead Insights',
         icon: Brain,
-        section: 'primary',
+        section: 'acquire',
         order: 1,
       },
     ],
   },
+
+  // ── Pillar 2 — ENGAGE ──
   {
     route: '/portal/content',
     navLabel: 'Campaigns',
     pageTitle: 'Campaigns',
     icon: Sparkles,
-    section: 'primary',
-    order: 2,
+    section: 'engage',
+    order: 0,
+    divider: true,
     children: [
       {
         route: '/portal/content-studio',
         navLabel: 'Content Studio',
         pageTitle: 'Content Studio',
         icon: PenSquare,
-        section: 'primary',
+        section: 'engage',
         order: 0,
       },
       {
@@ -99,7 +143,7 @@ export const NAV_CONFIG: NavConfigItem[] = [
         navLabel: 'Automations',
         pageTitle: 'Automations',
         icon: GitBranch,
-        section: 'primary',
+        section: 'engage',
         order: 1,
       },
     ],
@@ -109,48 +153,59 @@ export const NAV_CONFIG: NavConfigItem[] = [
     navLabel: 'Social',
     pageTitle: 'Social',
     icon: Send,
-    section: 'primary',
-    order: 3,
+    section: 'engage',
+    order: 1,
     children: [
       {
         route: '/portal/blog',
         navLabel: 'Blog Posts',
         pageTitle: 'Blog Posts',
         icon: PenSquare,
-        section: 'primary',
+        section: 'engage',
         order: 0,
       },
     ],
   },
-  {
-    route: '/portal/analytics',
-    navLabel: 'Reports',
-    pageTitle: 'Reports',
-    icon: PieChart,
-    section: 'primary',
-    order: 4,
-  },
 
-  // ── Tools ──
+  // ── Pillar 3 — CONVERT ──
   {
-    route: '/portal/ai',
-    navLabel: 'AI Assistant',
-    pageTitle: 'AI Assistant',
-    icon: MessageSquare,
-    section: 'tools',
+    route: '/portal/team-hub',
+    navLabel: 'Pipeline',
+    pageTitle: 'Pipeline',
+    icon: Zap,
+    section: 'convert',
     order: 0,
     divider: true,
   },
   {
-    route: '/portal/team-hub',
-    navLabel: 'Tasks',
-    pageTitle: 'Tasks',
-    icon: Zap,
-    section: 'tools',
+    route: '/portal/invoices',
+    navLabel: 'Invoices',
+    pageTitle: 'Invoices',
+    icon: FileText,
+    section: 'convert',
     order: 1,
   },
 
-  // ── Workspace (group) ──
+  // ── Pillar 4 — INTELLIGENCE ──
+  {
+    route: '/portal/analytics',
+    navLabel: 'Reports',
+    pageTitle: 'Reports',
+    icon: BarChart3,
+    section: 'intelligence',
+    order: 0,
+    divider: true,
+  },
+  {
+    route: '/portal/ai',
+    navLabel: 'AI Command Center',
+    pageTitle: 'AI Command Center',
+    icon: MessageSquare,
+    section: 'intelligence',
+    order: 1,
+  },
+
+  // ── Workspace shelf ──
   {
     route: '',
     navLabel: 'Workspace',
@@ -189,7 +244,7 @@ export const NAV_CONFIG: NavConfigItem[] = [
     ],
   },
 
-  // ── Billing (group) ──
+  // ── Billing shelf ──
   {
     route: '',
     navLabel: 'Billing',
@@ -218,7 +273,7 @@ export const NAV_CONFIG: NavConfigItem[] = [
     ],
   },
 
-  // ── Settings ──
+  // ── Settings shelf ──
   {
     route: '/portal/settings',
     navLabel: 'Settings',
@@ -249,7 +304,6 @@ export const NAV_CONFIG: NavConfigItem[] = [
 
 // ── Helpers ──
 
-/** Flat map of route → config item (includes children) */
 const _routeMap = new Map<string, NavConfigItem>();
 function populateMap(items: NavConfigItem[]) {
   for (const item of items) {
@@ -259,17 +313,14 @@ function populateMap(items: NavConfigItem[]) {
 }
 populateMap(NAV_CONFIG);
 
-/** Look up a nav config entry by its route path */
 export function getNavItem(route: string): NavConfigItem | undefined {
   return _routeMap.get(route);
 }
 
-/** Get the canonical page title for a route */
 export function getPageTitle(route: string): string | undefined {
   return _routeMap.get(route)?.pageTitle;
 }
 
-/** Find the parent nav item for a child route */
 export function getParentNavItem(route: string): NavConfigItem | undefined {
   for (const item of NAV_CONFIG) {
     if (item.children?.some(c => c.route === route)) return item;
@@ -277,7 +328,6 @@ export function getParentNavItem(route: string): NavConfigItem | undefined {
   return undefined;
 }
 
-/** Build breadcrumb segments for a route: [{ label, path }] */
 export function getBreadcrumbs(route: string): { label: string; path: string }[] {
   const crumbs: { label: string; path: string }[] = [];
   const parent = getParentNavItem(route);
@@ -289,4 +339,11 @@ export function getBreadcrumbs(route: string): { label: string; path: string }[]
     crumbs.push({ label: current.pageTitle, path: current.route });
   }
   return crumbs;
+}
+
+/** Items belonging to a single pillar, sorted by order. Used by sidebar + Mission Control. */
+export function getPillarItems(pillar: NavSection): NavConfigItem[] {
+  return NAV_CONFIG
+    .filter(i => i.section === pillar)
+    .sort((a, b) => a.order - b.order);
 }

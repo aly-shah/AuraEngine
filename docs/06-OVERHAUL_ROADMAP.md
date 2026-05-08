@@ -1,0 +1,240 @@
+# Scaliyo Overhaul Roadmap
+
+**Owner:** Engineering
+**Started:** 2026-05-08
+**Strategic premise:** Reposition Scaliyo as the **AI Revenue Operating System** — one unified surface for outbound revenue work, organised around four operating pillars (Acquire / Engage / Convert / Intelligence) with persistent AI memory and an active Mission Control as the daily entry point.
+
+This document tracks the phased rollout. Phase 1 is shipped in code on this branch. Phases 2–6 are scoped here with acceptance criteria, blast radius, and dependencies, but **not** executed without explicit go-ahead.
+
+---
+
+## Phase 1 — Foundation (✅ shipped this session)
+
+| Deliverable | File(s) | Status |
+|---|---|---|
+| Central AI config (model name, defaults) | `AuraEngine/lib/aiConfig.ts` (new) | ✅ |
+| Replace hardcoded `gemini-3-flash-preview` | `lib/gemini.ts:101`, `lib/dna.ts:441`, `pages/portal/ModelTraining.tsx:423` | ✅ |
+| Navigation pillars (Acquire/Engage/Convert/Intelligence) | `lib/navConfig.ts` (rewritten) | ✅ |
+| AI memory schema migration | `supabase/migrations/20260508000000_ai_memory_layer.sql` (new) | ✅ |
+| Memory access library + Gemini context builder | `lib/memory.ts` (new) | ✅ |
+| AI Mission Control page (additive route `/portal/mission`) | `pages/portal/MissionControl.tsx` (new) + App.tsx route | ✅ |
+| Phase roadmap document | `docs/06-OVERHAUL_ROADMAP.md` (this file) | ✅ |
+| Memory wiring into outreach Gemini calls (outreach-only scope) | `lib/gemini.ts` (3 functions: `generateLeadContent`, `generateEmailSequence`, `generateLeadResearch`) | ✅ |
+| Email tracking → `lead_memory` writer | `supabase/migrations/20260508100000_lead_memory_email_tracking.sql` + 3 edge functions (`email-track`, `webhooks-sendgrid`, `webhooks-mailchimp`) | ✅ |
+
+**Why these and not others.** Phase 1 had to be additive and reversible. Memory is foundational (everything in Phase 2 builds on it). Navigation pillars set the product story. Mission Control proves the AI-native pattern without removing the existing dashboard. Centralised AI config removes the friction tax on every future model upgrade. Nothing here touches the email send path, billing, RLS posture, or existing user data.
+
+**What was *not* done and why:**
+
+- **Replacing `ClientDashboard`.** Mission Control ships at `/portal/mission` as a new route. The default `/portal` index is unchanged. Cut over only after Mission Control gets validated with real users — A/B-testable today.
+- **Wiring `buildMemoryContext` into the live Gemini calls in `lib/gemini.ts`.** Done as a one-liner in Phase 2 once we agree on which calls should consume memory (every call? only outreach generation? cost implications matter — every call adds 12 + 8 + 8 rows of prompt overhead).
+- **pgvector / embeddings.** The memory schema reserves `embedding_meta` JSONB for a Phase 2 column add. We do not need vector search to ship Phase 2; tag/kind retrieval is sufficient until corpus size > a few hundred rows per workspace.
+
+---
+
+## Phase 2 — Realtime + Memory wiring (2–4 weeks)
+
+**Scope:**
+
+1. **Memory write hooks** — invoke `rememberLead` / `rememberCampaign` at three feedback points:
+   - ✅ Email open + click + delivered + bounced events (`email-track`, `webhooks-sendgrid`, `webhooks-mailchimp`) → `lead_memory` `kind=interaction` via SECURITY DEFINER `log_lead_memory_email_event` RPC. Migration `20260508100000_lead_memory_email_tracking.sql`. Bot + Apple-privacy filtered. Fire-and-forget; never blocks tracking. **Shipped 2026-05-08.**
+   - ⏳ Sequence-run completion (`process-email-writing-queue`) → `campaign_memory` `kind=outcome`.
+   - ⏳ User feedback in AI Command Center (thumbs up/down on a generated message) → `workspace_memory` `kind=winning_pattern` or `kind=avoid`.
+2. **Memory read in Gemini calls** — `lib/gemini.ts` `generateLeadContent`, `generateEmailSequence`, `generateLeadResearch` prepend `await buildMemoryContext({ workspaceId, leadId, campaignId, campaignKind })` to their system prompts. Add a feature flag `memory_context_enabled` in `workspace_memory` (kind=`feature_flag`) so workspaces can opt out if cost spikes.
+3. **Realtime subscriptions where polling exists.** From the audit:
+   - `useRealtimeJobs.ts` already exists — verify it's the canonical hook for `jobs` table updates.
+   - `useRealtimeEmailRun.ts` already exists for `email_sequence_runs`. Sweep the codebase for any place still doing `useEffect + supabase.from(...).select()` on stale-data flows and migrate.
+   - **Genuine polling is rare in this codebase** (see "Polling audit" below). The bigger lever is replacing `useQuery` `staleTime: 0` patterns with realtime invalidation.
+4. **AI inference for Mission Control recommendations.** Replace the rule-list in `MissionControl.tsx` `buildRecommendations` with an LLM reasoner that consumes `buildMemoryContext` + leads + campaign metrics and returns a ranked action list. Cache the LLM call for 4–6 hours per user.
+
+**Acceptance criteria:**
+- Reply-rate uplift measurable on a memory-on cohort vs. memory-off baseline.
+- Mission Control "Recommended for today" shows ≥ 1 LLM-generated rec per user.
+- No `useEffect` data-fetching loop with `setInterval` survives in `lib/` or `pages/`.
+
+**Blast radius:** Medium. Touches AI cost (every generation +N tokens of memory context) and the email send path's tracking webhook. Reversible via the `memory_context_enabled` feature flag.
+
+### Polling audit (verified in Phase 1)
+
+The polling story is already healthy. Greppable findings from `pages/`, `lib/`, `hooks/`:
+
+| File:line | Pattern | Verdict |
+|---|---|---|
+| `lib/gemini.ts` (multiple) | `setTimeout(res, 1000 * attempt)` | Retry backoff. Keep. |
+| `lib/gemini.ts` (multiple) | `setTimeout(() => controller.abort(), N)` | Request timeout. Keep. |
+| `pages/portal/ProfilePage.tsx:182` | `setInterval(..., 1000)` | UI elapsed-time counter while enrichment runs. Not data polling. Keep. |
+| `pages/portal/*.tsx` (toast pattern) | `setTimeout(() => setToast(null), N)` | Toast auto-dismiss. Keep. |
+| `pages/portal/*.tsx` (copy-confirm) | `setTimeout(() => setCopied(false), 2000)` | Copy-to-clipboard feedback. Keep. |
+
+**Conclusion:** there are zero unjustified data-polling loops in the client. The realtime story is already strong. Phase 2's "realtime work" is therefore not about replacing polling — it's about wiring **write-side events** into memory + Mission Control.
+
+---
+
+## Phase 3 — Outreach scale (4–8 weeks)
+
+**Why this phase exists:** Today's email pipeline is `process-email-writing-queue` + `process-scheduled-emails` + `send-email`, dispatched serially per scheduled tick. At ~10 customers × 1k leads × 3-step sequence, this works. At ~100 customers × 5k leads × 7-step sequence, it bottlenecks on (a) Gemini rate limits, (b) provider rate limits, (c) sender reputation.
+
+**Scope:**
+
+1. **Queue priorities.** Push BullMQ queue layer in `backend/` to its full potential:
+   - `outreach-write` (priority by deal size / lead score)
+   - `outreach-send` (priority by warmup status)
+   - `outreach-retry` (transient bounces, delayed)
+   - `outreach-dlq` (hard bounces, alert)
+2. **Sender rotation + warmup.** `sender_accounts` already exists; add:
+   - `sender_account_health` table tracking 7-day spam complaint rate, bounce rate, daily volume cap.
+   - Warmup ramp: new accounts capped at 50/day rising to 500/day over 21 days.
+   - Round-robin selection weighted by health.
+3. **Provider failover.** If Gmail OAuth fails, fall back to SendGrid (or vice versa) for the same workspace. Existing `connect-*` edge functions already enroll multiple providers.
+4. **Concurrency control.** Per-workspace rate limit (currently global). Per-domain rate limit on recipient side (don't blast 50 emails into the same MX in 30s).
+
+**Acceptance criteria:**
+- Workspace-level send concurrency configurable from `/admin/pricing`.
+- One sender suspended → traffic auto-shifts within 60 s.
+- DLQ inspectable from `/admin/ops` with replay button.
+
+**Blast radius:** High. This is the revenue path. Recommend doing on a feature branch with a parallel "shadow send" that compares old vs. new before cutting over.
+
+---
+
+## Phase 4 — Enterprise readiness (6–12 weeks)
+
+**Scope:**
+
+1. **SSO / SAML.** Supabase Auth doesn't natively do SAML — three options:
+   - (a) Layer WorkOS on top (fastest, ~2 weeks).
+   - (b) Use Supabase's "External Auth" with a pre-validated JWT from an IdP gateway.
+   - (c) Roll our own SAML responder edge function (longest, most control).
+   Recommend (a) for first enterprise deals; revisit (c) at scale.
+2. **Public API + key management.**
+   - `/api/v1/leads`, `/api/v1/sequences`, `/api/v1/campaigns` — REST + cursor-paginated.
+   - Personal access tokens stored in a new `api_keys` table with scoped permissions, hashed-at-rest, rotation policy.
+   - Rate limit per key (separate from user JWT path).
+3. **Webhook outbound management.**
+   - `webhooks_outbound` table: workspace_id, url, secret, event_filter, retries.
+   - Sign payloads with HMAC; document `X-Scaliyo-Signature`.
+   - Retry with exponential backoff up to 24 h.
+4. **Audit exports.** `audit_logs` already exists (per `20260302000001_teamhub_v2_audit_log_upgrade.sql`). Add a streaming export edge function (CSV / JSON) gated to admins, plus a schedulable export-to-S3 hook for SOC2.
+5. **RBAC improvements.** Today: Admin / Client / TeamRole. Add: Org Admin, Workspace Admin, Member, Viewer. Replace ad-hoc role checks with a single `hasPermission(user, action, resource)` helper.
+6. **White-label.** Theme tokens (logo, colors, domain) stored per workspace; rendered into the SPA via a CSS-vars layer. The Nginx config already supports `app.scaliyo.com`; whitelabel tenants get CNAME-mapped vanity domains.
+
+**Acceptance criteria:**
+- One enterprise pilot live on SSO + their own subdomain.
+- Public API with at least three endpoints documented (OpenAPI 3.1).
+- Audit export downloadable from admin console.
+
+**Blast radius:** Medium. SSO is the highest-blast item — easy to break login for everyone if the redirect handling is wrong. Roll out gated by domain.
+
+---
+
+## Phase 5 — Service decomposition (8–12 weeks)
+
+**Premise:** Today the backend is one Express + BullMQ worker plus 30 edge functions. That's fine. **Don't decompose until you have data showing a specific bottleneck.** Premature service splits cost a quarter and add ops complexity for no scale benefit.
+
+**When to split (decision criteria, not a timeline):**
+
+| Trigger | Service to extract |
+|---|---|
+| AI generation queue depth > 5 min p95 | **AI Engine** (separate worker pool, GPU-adjacent if needed) |
+| Email send latency > 30 s p95 sustained | **Outreach Engine** (separate worker, per-region presence) |
+| Analytics query > 2 s on Supabase pg | **Analytics Engine** (read replica + materialised views) |
+| Concurrent realtime subscriptions > 10k | **Realtime Gateway** (dedicated WS layer in front of Supabase realtime) |
+
+**Scope (when triggered):** extract into TypeScript packages first (monorepo structure), then optionally into separate deployments. Keep the contract Postgres-row-based via outbox tables — don't introduce a new RPC fabric until you have to.
+
+---
+
+## Phase 6 — Goal-based AI automation (depends on Phase 2 + Phase 5)
+
+**Premise:** Today's automations are `Trigger → Condition → Action`. Goal-based automations are `Goal → Plan → Execute → Observe → Replan`. This is the venture-scale moat — but it requires Phase 2 (memory) and ideally Phase 5 (extractable AI Engine) to be in place first.
+
+**Scope:**
+
+1. **Goal table.** `automation_goals(id, workspace_id, statement, target_metric, target_value, due_at, status)` — e.g. statement="Book 10 SaaS demos", metric=`meetings_booked`, target=10.
+2. **Planner.** LLM call that decomposes a goal into a sequence of automation steps with checkpoints. Stored in `automation_plans` with versioning.
+3. **Executor.** Runs each step using existing automation primitives (Apollo search → enrichment → sequence start → wait for response → score).
+4. **Observer.** After each checkpoint, compares outcome to target. If off-track, calls the Replan LLM.
+5. **Memory feedback.** Plans that succeed get written to `workspace_memory` `kind=winning_pattern`. Plans that fail get written to `kind=avoid`. The Planner reads both.
+
+**Acceptance criteria:**
+- One worked example end-to-end: "Book 10 SaaS demos" → 10 meetings booked, all triggered by a single user goal entry.
+- Replanner adjusts mid-flight at least once based on observed metrics.
+
+**Blast radius:** Highest. This is the most novel surface and the most failure-prone. Build behind a feature flag, opt-in only for design-partner customers.
+
+---
+
+## Architecture map (target end state)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        scaliyo.com (marketing)                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      app.scaliyo.com  (React SPA)                        │
+│   Mission Control · Acquire · Engage · Convert · Intelligence            │
+│                       Cmd+K command palette                              │
+└──────────────┬───────────────┬─────────────────┬────────────────────────┘
+               │ JWT           │ JWT             │ JWT
+               ▼               ▼                 ▼
+┌────────────────────┐ ┌────────────────┐ ┌─────────────────────────────┐
+│  Supabase Auth     │ │ Supabase REST  │ │ Supabase Realtime           │
+│  (+ SSO via WorkOS)│ │ (RLS-scoped)   │ │ (jobs / runs / memory tail) │
+└────────────────────┘ └─────┬──────────┘ └─────────────────────────────┘
+                             │
+                  ┌──────────┴───────────────────────────────────┐
+                  ▼                                              ▼
+          ┌───────────────┐                            ┌───────────────────┐
+          │ Postgres      │                            │  Edge Functions   │
+          │ (RLS, pgcron) │                            │  (gemini-proxy,   │
+          │ ────────────  │                            │   billing-*,      │
+          │ workspaces    │                            │   send-email,     │
+          │ leads         │                            │   apollo-*,       │
+          │ workspace_mem │                            │   social-*,       │
+          │ lead_memory   │                            │   image-gen)      │
+          │ campaign_mem  │                            └─────────┬─────────┘
+          │ jobs/queues   │                                      │
+          └──────┬────────┘                                      ▼
+                 │                                     ┌──────────────────┐
+                 ▼                                     │  Google Gemini   │
+       ┌──────────────────┐                            │  + Imagen        │
+       │ Backend worker   │                            └──────────────────┘
+       │ (Express+BullMQ) │
+       │ ai-queue         │   ── Phase 5 split:        ┌──────────────────┐
+       │ data-queue       │   AI Engine (separate)     │  Stripe          │
+       │ research/cheerio │   Outreach Engine          │  ElevenLabs      │
+       └──────────────────┘   Analytics Engine         │  Apollo          │
+                                                       │  LinkedIn / Meta │
+                                                       └──────────────────┘
+```
+
+The bold lines (workspace_mem / lead_memory / campaign_mem) are net-new in Phase 1. The "Phase 5 split" lanes are dotted — extract only when triggered.
+
+---
+
+## Decisions needed before Phase 2 starts
+
+I'm flagging these so we can discuss before sinking work into them:
+
+1. **Memory context cost.** Every Gemini call carries an extra ~500–2,000 tokens of memory context. At Free-tier 200 credits/month, this matters. Two options:
+   - (a) Apply only to `outreach generation` calls (highest-leverage), not lead research / blog / dashboard insights.
+   - (b) Apply universally; raise plan credit limits to compensate.
+2. **Mission Control as default `/portal`.** When do we cut over from `ClientDashboard` to `MissionControl` as the index route? Recommend: behind a feature flag for 2–4 weeks, then default-on, then remove `ClientDashboard` after 4 weeks of zero rollback events.
+3. **SSO vendor.** WorkOS vs. Auth0 vs. Cognito vs. building on Supabase's own. Affects pricing model + lock-in.
+4. **Public API surface.** Read-only first, or read+write? Read-only ships faster but converts fewer Enterprise pilots.
+5. **Whitelabel scope.** Just colors/logo, or full vanity domain? Vanity domain needs CNAME + per-tenant TLS via Let's Encrypt automation.
+
+---
+
+## Out of scope for this overhaul (deliberately)
+
+- **Mobile native app.** The mobile portal under `/portal/mobile` is a responsive React shell. A native app is a separate product. Not on this roadmap.
+- **Full migration consolidation.** The 65 timestamped migrations + ~20 legacy `supabase-*.sql` files at `AuraEngine/` root are messy but not broken. Consolidating them is busywork until we hit Postgres limits.
+- **Replacing the Strategy Hub.** `strategy_tasks` / `strategy_notes` are flagged for product decision in `20260413400000_drop_orphan_tables.sql`. That decision happens before any related code changes — ask the product owner.
+- **Voice agent rebuild.** ElevenLabs integration works. Phase 2 may add memory awareness; full rebuild is not justified by current usage data.
+
+---
+
+*Generated 2026-05-08 against git HEAD `853ea41`. Owner: Engineering. Update this file at the end of every phase.*

@@ -1,8 +1,37 @@
-import { GoogleGenAI } from "@google/genai";
 import { ContentType, ContentCategory, ToneType, EmailSequenceConfig, EmailStep, Lead, BusinessProfile, BusinessAnalysisResult, KnowledgeBase } from "../types";
 import { supabase } from "./supabase";
 import { resolvePrompt } from "./promptResolver";
 import { leadDisplayName } from "./queries";
+import { getGeminiClient } from "./geminiClient";
+import { AI_MODELS } from "./aiConfig";
+import { buildMemoryContext, resolveWorkspaceForUser } from "./memory";
+
+// AI Memory injection (Phase 2 — outreach-only scope).
+//
+// Resolves the user's workspace and pulls workspace + (optionally) lead +
+// campaign memory rows. Returns "" on any failure so outreach generation
+// never breaks if the memory layer is unavailable.
+async function safeMemoryContext(opts: {
+  userId?: string;
+  leadId?: string;
+  campaignKind?: string;
+  campaignId?: string;
+}): Promise<string> {
+  if (!opts.userId) return '';
+  try {
+    const workspaceId = await resolveWorkspaceForUser(opts.userId);
+    if (!workspaceId) return '';
+    return await buildMemoryContext({
+      workspaceId,
+      leadId: opts.leadId,
+      campaignKind: opts.campaignKind,
+      campaignId: opts.campaignId,
+    });
+  } catch (err) {
+    console.warn('[memory] context build failed; proceeding without memory:', err);
+    return '';
+  }
+}
 
 const buildBusinessContext = (profile?: BusinessProfile): string => {
   if (!profile) return '';
@@ -98,7 +127,7 @@ export const buildEmailFooter = (profile?: BusinessProfile): string => {
 
 const MAX_RETRIES = 3;
 const TIMEOUT_MS = 15000;
-const MODEL_NAME = 'gemini-3-flash-preview';
+const MODEL_NAME = AI_MODELS.text;
 
 export interface AIResponse {
   text: string;
@@ -114,7 +143,7 @@ export interface StreamOptions {
 }
 
 export const generateLeadContent = async (lead: Lead, type: ContentType, businessProfile?: BusinessProfile, userId?: string): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const resolved = await resolvePrompt('sales_outreach', userId, {
     systemInstruction: `You are a world-class B2B sales development representative specializing in hyper-personalized outreach.
@@ -152,6 +181,9 @@ Avoid generic corporate jargon. Focus on the prospect's pain points and industry
     .replace('{{type}}', type)
     .replace('{{tone}}', lead.score > 80 ? 'high-priority and urgent' : 'helpful and consultative');
 
+  // AI memory: pull workspace prefs + this lead's prior interactions.
+  const memoryCtx = await safeMemoryContext({ userId, leadId: lead.id });
+
   let attempt = 0;
   while (attempt < MAX_RETRIES) {
     try {
@@ -162,7 +194,7 @@ Avoid generic corporate jargon. Focus on the prospect's pain points and industry
         model: MODEL_NAME,
         contents: finalPrompt,
         config: {
-          systemInstruction: systemInstruction + buildBusinessContext(businessProfile),
+          systemInstruction: systemInstruction + buildBusinessContext(businessProfile) + memoryCtx,
           temperature: resolved.temperature,
           topP: resolved.topP,
           topK: 40,
@@ -209,7 +241,7 @@ Avoid generic corporate jargon. Focus on the prospect's pain points and industry
 };
 
 export const generateDashboardInsights = async (leads: Lead[], businessProfile?: BusinessProfile, userId?: string): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const leadSummary = leads.slice(0, 20).map(l =>
     `${l.name} (${l.company}) - Score: ${l.score}, Status: ${l.status}`
@@ -298,7 +330,7 @@ export const generateEmailSequence = async (
   userId?: string,
   streamOpts?: StreamOptions
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const leadContext = leads.slice(0, 5).map(l => {
     let ctx = `- ${l.name} at ${l.company} (Score: ${l.score}, Status: ${l.status}, Insights: ${l.insights})`;
@@ -360,8 +392,16 @@ BODY:
     .replace(/\{\{tone\}\}/g, config.tone)
     .replace('{{audience_count}}', config.audienceLeadIds.length.toString());
 
+  // AI memory: workspace prefs + outcomes from past email_sequence campaigns.
+  // We don't filter to a specific campaignId because this is generation time —
+  // the new sequence doesn't have an id yet.
+  const memoryCtx = await safeMemoryContext({
+    userId,
+    campaignKind: 'email_sequence',
+  });
+
   const genConfig = {
-    systemInstruction: resolved.systemInstruction + buildBusinessContext(businessProfile),
+    systemInstruction: resolved.systemInstruction + buildBusinessContext(businessProfile) + memoryCtx,
     temperature: resolved.temperature,
     topP: resolved.topP,
     topK: 40,
@@ -435,7 +475,7 @@ export const generateContentByCategory = async (
   businessProfile?: BusinessProfile,
   userId?: string
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   // Map ContentCategory to prompt keys
   const categoryKeyMap: Record<ContentCategory, string> = {
@@ -551,7 +591,7 @@ export const generateLeadResearch = async (
   businessProfile?: BusinessProfile,
   userId?: string
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const urlContext = Object.entries(socialUrls)
     .filter(([_, v]) => v)
@@ -721,7 +761,11 @@ Return ONE structured JSON object in this exact schema (no commentary outside th
     .replace('{{insights}}', lead.insights ? `- Existing Insights: ${lead.insights}` : '')
     .replace('{{url_context}}', urlContext || 'None provided');
 
-  const systemInstruction = resolved.systemInstruction + buildBusinessContext(businessProfile);
+  // AI memory: workspace prefs only — research runs before the lead is saved,
+  // so there is no leadId yet, and research isn't a campaign.
+  const memoryCtx = await safeMemoryContext({ userId });
+
+  const systemInstruction = resolved.systemInstruction + buildBusinessContext(businessProfile) + memoryCtx;
 
   let attempt = 0;
   while (attempt < MAX_RETRIES) {
@@ -900,7 +944,7 @@ export const analyzeBusinessFromWeb = async (
   socialUrls?: { linkedin?: string; twitter?: string; instagram?: string; facebook?: string },
   userId?: string
 ): Promise<AIResponse & { analysis: BusinessAnalysisResult | null }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const socialContext = socialUrls
     ? Object.entries(socialUrls)
@@ -1142,7 +1186,7 @@ export const generateFollowUpQuestions = async (
   previousQA?: { field: string; question: string; answer: string }[],
   userId?: string
 ): Promise<{ questions: { field: string; question: string; placeholder: string }[]; tokens_used: number }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const profileContext = Object.entries(currentProfile)
     .filter(([_, v]) => v)
@@ -1234,7 +1278,7 @@ export const generateCommandCenterResponse = async (
   userId?: string,
   streamOpts?: StreamOptions
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   // Build lead context from top 15 leads
   const topLeads = leads.slice(0, 15);
@@ -1373,7 +1417,7 @@ export const generateContentSuggestions = async (
   businessProfile?: BusinessProfile,
   userId?: string
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const modeLabel = mode === 'email' ? 'cold email' : mode === 'linkedin' ? 'LinkedIn post' : 'sales proposal';
 
@@ -1476,7 +1520,7 @@ export const generatePipelineStrategy = async (
   input: PipelineStrategyInput,
   userId?: string
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const statusStr = Object.entries(input.statusBreakdown)
     .map(([k, v]) => `${k}: ${v}`)
@@ -1629,7 +1673,7 @@ export interface BlogContentParams {
 }
 
 export const generateBlogContent = async (params: BlogContentParams, userId?: string, streamOpts?: StreamOptions): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const modeKeyMap: Record<BlogContentMode, string> = {
     full_draft: 'blog_full_draft',
@@ -1777,7 +1821,7 @@ export interface SocialCaptionParams {
 }
 
 export const generateSocialCaption = async (params: SocialCaptionParams, userId?: string): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const promptKey = `social_${params.platform}`;
 
@@ -1875,7 +1919,7 @@ export async function generatePersonalizedEmail(
   input: PersonalizeEmailInput,
   userId?: string
 ): Promise<{ subject: string; htmlBody: string; tokensUsed: number }> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const leadContext = [
     `Name: ${leadDisplayName(input.lead)}`,
@@ -2035,7 +2079,7 @@ export const generateWorkflowOptimization = async (
   businessProfile?: BusinessProfile,
   userId?: string
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const nodesSummary = input.nodes.map((n, i) =>
     `${i + 1}. [${n.type.toUpperCase()}] ${n.title} — ${n.description}`
@@ -2135,7 +2179,7 @@ export const generateGuestPostPitch = async (
   params: GuestPostPitchParams,
   userId?: string
 ): Promise<AIResponse> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getGeminiClient();
 
   const resolved = await resolvePrompt('guest_post_pitch', userId, {
     systemInstruction: 'You are an expert guest post outreach specialist. Write compelling, personalized pitch emails that blog editors actually want to respond to. Be concise and professional.',

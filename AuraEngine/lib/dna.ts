@@ -1,5 +1,6 @@
-import { GoogleGenAI } from '@google/genai';
 import { supabase } from './supabase';
+import { getGeminiClient } from './geminiClient';
+import { AI_MODELS } from './aiConfig';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -436,9 +437,9 @@ export async function testDnaPrompt(
   try {
     const { systemInstruction, finalPrompt } = buildPromptFromDnaRecord(dna, variables, context);
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getGeminiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: AI_MODELS.text,
       contents: finalPrompt,
       config: {
         systemInstruction,

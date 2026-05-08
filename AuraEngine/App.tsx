@@ -43,6 +43,7 @@ const OnboardingPage = lazy(() => import('./pages/portal/OnboardingPage'));
 
 // Client Portal
 const ClientDashboard = lazy(() => import('./pages/portal/ClientDashboard'));
+const MissionControl = lazy(() => import('./pages/portal/MissionControl'));
 const LeadManagement = lazy(() => import('./pages/portal/LeadManagement'));
 const LeadProfile = lazy(() => import('./pages/portal/LeadProfile'));
 const ContentGen = lazy(() => import('./pages/portal/ContentGen'));
@@ -273,6 +274,7 @@ const App: React.FC = () => {
             }
           >
             <Route index element={<ClientDashboard user={user!} />} />
+            <Route path="mission" element={<MissionControl />} />
             <Route path="leads" element={<LeadManagement />} />
             <Route path="leads/apollo" element={<ApolloSearchPage />} />
             <Route path="leads/:leadId" element={<LeadProfile />} />
