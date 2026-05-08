@@ -24,6 +24,7 @@ This document tracks the phased rollout. Phase 1 is shipped in code on this bran
 | Sequence completion → `campaign_memory` outcome writer (cron-driven, 48h delay) | `supabase/migrations/20260508200000_campaign_memory_sequence_outcome.sql` | ✅ |
 | AI Command Center thumbs feedback → `workspace_memory` writer | `components/ai/MessageRow.tsx` + `pages/portal/AICommandCenter.tsx` | ✅ |
 | Mission Control becomes default `/portal` (legacy dashboard moved to `/portal/dashboard` + reachable via "Full dashboard" button) | `App.tsx` route swap + `MissionControl.tsx` header CTA | ✅ |
+| Sender health foundation (additive, no send-path changes) — Phase 3.1 | `supabase/migrations/20260508300000_sender_health_foundation.sql` | ✅ |
 
 **Why these and not others.** Phase 1 had to be additive and reversible. Memory is foundational (everything in Phase 2 builds on it). Navigation pillars set the product story. Mission Control proves the AI-native pattern without removing the existing dashboard. Centralised AI config removes the friction tax on every future model upgrade. Nothing here touches the email send path, billing, RLS posture, or existing user data.
 
@@ -74,6 +75,45 @@ The polling story is already healthy. Greppable findings from `pages/`, `lib/`, 
 ---
 
 ## Phase 3 — Outreach scale (4–8 weeks)
+
+### Phase 3.1 — Sender health foundation (✅ shipped 2026-05-08)
+
+Pure-additive groundwork. No send-path behavior changes. Every piece
+lights up automatically once Phase 3.2 wires `send-email` to use it.
+
+| Deliverable | File / Object |
+|---|---|
+| `email_messages.sender_account_id` (nullable FK) | migration `20260508300000_sender_health_foundation.sql` |
+| `sender_accounts.{bounce_rate_7d, complaint_rate_7d, consecutive_failures}` | same migration |
+| `email_dlq` table (RLS workspace-scoped, write-only by service role) | same migration |
+| `compute_sender_health(sender_id)` SECURITY DEFINER | same migration |
+| `sender_daily_cap(sender_id)` STABLE function (warmup ramp + health throttle) | same migration |
+| `pick_outreach_sender(workspace_id)` STABLE function (health/utilisation ordering) | same migration |
+| `refresh-sender-health` pg_cron job (hourly at :22) | same migration |
+
+### Phase 3.2 — send-path cutover (NOT YET — needs dedicated session)
+
+The high-blast piece. Until shipped, `send-email/index.ts` continues to
+read from legacy `email_provider_configs` and `email_messages.sender_account_id`
+remains null for new rows.
+
+**Required scope:**
+1. Modify `send-email/index.ts` to call `pick_outreach_sender(workspace_id)`,
+   read creds from `sender_account_secrets` via service role, write
+   `sender_account_id` onto each `email_messages` row.
+2. Migrate existing `email_provider_configs` rows → `sender_accounts` /
+   `sender_account_secrets` (one-time data migration, idempotent).
+3. Wire `email_dlq` writes for hard bounces in `webhooks-sendgrid` and
+   `webhooks-mailchimp` event handlers.
+4. Reset `consecutive_failures` to 0 on successful send; increment on failure.
+5. Pre-flight check `daily_sent < daily_cap` and bail with explicit error
+   if all senders are capped.
+
+**Acceptance criteria:** Health scores trend with real bounce/spam rates;
+warmup ramp visible on freshly-enrolled accounts; one sender suspended
+(health < 25) → traffic auto-shifts within one cron tick.
+
+### Phase 3.3+ — original Phase 3 scope (still planned, not started)
 
 **Why this phase exists:** Today's email pipeline is `process-email-writing-queue` + `process-scheduled-emails` + `send-email`, dispatched serially per scheduled tick. At ~10 customers × 1k leads × 3-step sequence, this works. At ~100 customers × 5k leads × 7-step sequence, it bottlenecks on (a) Gemini rate limits, (b) provider rate limits, (c) sender reputation.
 
