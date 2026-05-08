@@ -113,10 +113,11 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Mailchimp lacks a stable message ID, so match by to_email + provider + most recent
+    // Mailchimp lacks a stable message ID, so match by to_email + provider + most recent.
+    // Fetch workspace_id + sender_account_id for the DLQ writer below.
     const { data: message } = await supabaseAdmin
       .from("email_messages")
-      .select("id")
+      .select("id, workspace_id, sender_account_id, to_email, lead_id")
       .eq("to_email", toEmail)
       .eq("provider", "mailchimp")
       .order("created_at", { ascending: false })
@@ -177,6 +178,33 @@ serve(async (req) => {
       }).then(({ error: memErr }) => {
         if (memErr) console.warn("Mailchimp memory write skipped:", memErr.message);
       });
+
+      // ── Phase 3.2.1: DLQ for unrecoverable failures ──
+      // Mailchimp distinguishes hard_bounce vs soft_bounce in the source `type`.
+      // We only DLQ hard bounces (mailbox doesn't exist) — soft bounces are transient.
+      const dlqKind: string | null =
+        type === "hard_bounce" ? "hard_bounce"
+        : type === "spam"      ? "spam_complaint"
+        : type === "unsub"     ? "unsubscribed"
+        : null;
+
+      if (dlqKind && message.workspace_id) {
+        supabaseAdmin.from("email_dlq").insert({
+          workspace_id:      message.workspace_id,
+          sender_account_id: message.sender_account_id,
+          message_id:        message.id,
+          to_email:          message.to_email,
+          kind:              dlqKind,
+          reason:            (formData.get("data[reason]") as string | null) ?? null,
+          metadata: {
+            mc_type: type,
+            data_id: formData.get("data[id]"),
+            email:   formData.get("data[email]"),
+          },
+        }).then(({ error: dlqErr }) => {
+          if (dlqErr) console.warn("Mailchimp DLQ write skipped:", dlqErr.message);
+        });
+      }
     }
 
     return new Response(JSON.stringify({ status: "processed" }), {

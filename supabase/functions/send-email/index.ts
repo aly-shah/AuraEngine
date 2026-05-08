@@ -423,12 +423,47 @@ serve(async (req) => {
     const senderEmail =
       from_email || creds.from_email || creds.smtp_user || "noreply@example.com";
 
+    // ── Phase 3.2.1: resolve workspace_id + sender_account_id ──
+    // We don't yet read credentials from sender_account_secrets — the
+    // legacy email_provider_configs path above is still authoritative —
+    // but we DO populate the new IDs on email_messages so the Phase 3.1
+    // sender-health functions get real data. If either lookup fails,
+    // we leave the column null and proceed.
+    let workspaceId: string | null = null;
+    let senderAccountId: string | null = null;
+    try {
+      const { data: wm } = await supabaseAdmin
+        .from("workspace_members")
+        .select("workspace_id")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      workspaceId = (wm?.workspace_id as string | undefined) ?? null;
+
+      if (workspaceId) {
+        const { data: sa } = await supabaseAdmin
+          .from("sender_accounts")
+          .select("id")
+          .eq("workspace_id", workspaceId)
+          .eq("provider", provider)
+          .ilike("from_email", senderEmail)
+          .limit(1)
+          .maybeSingle();
+        senderAccountId = (sa?.id as string | undefined) ?? null;
+      }
+    } catch (lookupErr) {
+      console.warn("[send-email] sender_account lookup failed:", (lookupErr as Error).message);
+    }
+
     // 1. Create email_messages record
     const { data: emailMsg, error: msgError } = await supabaseAdmin
       .from("email_messages")
       .insert({
         lead_id: lead_id || null,
         owner_id: userId,
+        workspace_id: workspaceId,
+        sender_account_id: senderAccountId,
         provider,
         subject,
         to_email,
@@ -519,6 +554,21 @@ serve(async (req) => {
           })
           .eq("id", emailMsg.id);
       }
+
+      // ── Phase 3.2.1: tick sender counters on success ──
+      // Fire-and-forget. Failure to update counters must not break sending.
+      if (senderAccountId) {
+        supabaseAdmin.rpc("increment_sender_daily_sent", {
+          p_sender_id: senderAccountId,
+        }).then(({ error }) => {
+          if (error) console.warn("increment_sender_daily_sent failed:", error.message);
+        });
+        supabaseAdmin.rpc("reset_sender_failures", {
+          p_sender_id: senderAccountId,
+        }).then(({ error }) => {
+          if (error) console.warn("reset_sender_failures failed:", error.message);
+        });
+      }
     } else {
       await supabaseAdmin
         .from("email_messages")
@@ -527,6 +577,15 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
         })
         .eq("id", emailMsg.id);
+
+      // ── Phase 3.2.1: tick failure counter ──
+      if (senderAccountId) {
+        supabaseAdmin.rpc("increment_sender_failures", {
+          p_sender_id: senderAccountId,
+        }).then(({ error }) => {
+          if (error) console.warn("increment_sender_failures failed:", error.message);
+        });
+      }
     }
 
     return new Response(

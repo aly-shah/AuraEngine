@@ -26,6 +26,7 @@ This document tracks the phased rollout. Phase 1 is shipped in code on this bran
 | Mission Control becomes default `/portal` (legacy dashboard moved to `/portal/dashboard` + reachable via "Full dashboard" button) | `App.tsx` route swap + `MissionControl.tsx` header CTA | ✅ |
 | Sender health foundation (additive, no send-path changes) — Phase 3.1 | `supabase/migrations/20260508300000_sender_health_foundation.sql` | ✅ |
 | DB refinement: `email_messages.workspace_id`, `email_dlq` FK correction, deprecation comments on `ai_prompts` / `ai_usage_logs` / `email_provider_configs` / `strategy_tasks` / `strategy_notes` / legacy `leads` columns | `supabase/migrations/20260508400000_db_refinement.sql` | ✅ |
+| Phase 3.2.1 send-path data migration + counters + DLQ wiring (credential source still legacy) | `supabase/migrations/20260508500000_send_path_data_migration.sql` + 3 edge function updates | ✅ |
 
 **Why these and not others.** Phase 1 had to be additive and reversible. Memory is foundational (everything in Phase 2 builds on it). Navigation pillars set the product story. Mission Control proves the AI-native pattern without removing the existing dashboard. Centralised AI config removes the friction tax on every future model upgrade. Nothing here touches the email send path, billing, RLS posture, or existing user data.
 
@@ -92,23 +93,43 @@ lights up automatically once Phase 3.2 wires `send-email` to use it.
 | `pick_outreach_sender(workspace_id)` STABLE function (health/utilisation ordering) | same migration |
 | `refresh-sender-health` pg_cron job (hourly at :22) | same migration |
 
-### Phase 3.2 — send-path cutover (NOT YET — needs dedicated session)
+### Phase 3.2.1 — data migration + counters + DLQ wiring (✅ shipped 2026-05-08)
+
+Reconnaissance ahead of this ship found 3 active `email_provider_configs`
+rows (gmail+smtp), 1 pre-existing `sender_accounts` row, and **0 emails sent
+in the last 30 days**. The zero-traffic finding made the blast radius
+trivially small; this is a much safer window than the roadmap originally
+anticipated.
+
+| Deliverable | File / Object |
+|---|---|
+| Idempotent migration `email_provider_configs` → `sender_accounts` + `sender_account_secrets` (deduped on `(workspace_id, provider, from_email)` UNIQUE) | `supabase/migrations/20260508500000_send_path_data_migration.sql` |
+| `reset_sender_failures(sender_id)` + `increment_sender_failures(sender_id)` SECURITY DEFINER RPCs | same migration |
+| `send-email` populates `email_messages.workspace_id` + `sender_account_id` on insert; calls `increment_sender_daily_sent` + `reset_sender_failures` on success; `increment_sender_failures` on failure | `supabase/functions/send-email/index.ts` |
+| `webhooks-sendgrid` writes `email_dlq` rows on `hard_bounce` (status 5xx), `spam_complaint`, `unsubscribed` | `supabase/functions/webhooks-sendgrid/index.ts` |
+| `webhooks-mailchimp` writes `email_dlq` rows on `hard_bounce`, `spam`, `unsub` | `supabase/functions/webhooks-mailchimp/index.ts` |
+
+What this earns: the Phase 3.1 sender-health functions now get real data
+the moment any send happens; `email_dlq` starts collecting unrecoverable
+failures; `consecutive_failures` ticks correctly so the circuit breaker
+in `sender_daily_cap` becomes load-bearing.
+
+What's still pending: send-email continues to read **credentials** from
+`email_provider_configs` (legacy). Phase 3.2.2 below flips that.
+
+### Phase 3.2.2 — credential source swap (NOT YET — needs dedicated session)
 
 The high-blast piece. Until shipped, `send-email/index.ts` continues to
 read from legacy `email_provider_configs` and `email_messages.sender_account_id`
 remains null for new rows.
 
-**Required scope:**
-1. Modify `send-email/index.ts` to call `pick_outreach_sender(workspace_id)`,
-   read creds from `sender_account_secrets` via service role, write
-   `sender_account_id` onto each `email_messages` row.
-2. Migrate existing `email_provider_configs` rows → `sender_accounts` /
-   `sender_account_secrets` (one-time data migration, idempotent).
-3. Wire `email_dlq` writes for hard bounces in `webhooks-sendgrid` and
-   `webhooks-mailchimp` event handlers.
-4. Reset `consecutive_failures` to 0 on successful send; increment on failure.
-5. Pre-flight check `daily_sent < daily_cap` and bail with explicit error
-   if all senders are capped.
+**Required scope (3.2.1 done; 3.2.2 still owed):**
+1. ✅ Migrate existing `email_provider_configs` → `sender_accounts` / `sender_account_secrets` (Phase 3.2.1)
+2. ⏳ Modify `send-email/index.ts` to call `pick_outreach_sender(workspace_id)`, read creds from `sender_account_secrets` via service role
+3. ✅ `email_messages.sender_account_id` populated on insert (Phase 3.2.1)
+4. ✅ `email_dlq` writes wired in both webhook handlers (Phase 3.2.1)
+5. ✅ `consecutive_failures` reset/increment (Phase 3.2.1)
+6. ⏳ Pre-flight check `daily_sent < daily_cap` and bail with explicit error if all senders are capped
 
 **Acceptance criteria:** Health scores trend with real bounce/spam rates;
 warmup ramp visible on freshly-enrolled accounts; one sender suspended

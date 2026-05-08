@@ -90,10 +90,11 @@ serve(async (req) => {
       const sgMessageId = (event.sg_message_id ?? "").split(".")[0];
       if (!sgMessageId) continue;
 
-      // Find matching email_messages row
+      // Find matching email_messages row (workspace_id + sender_account_id
+      // + to_email needed for the email_dlq writer below).
       const { data: message } = await supabaseAdmin
         .from("email_messages")
-        .select("id")
+        .select("id, workspace_id, sender_account_id, to_email, lead_id")
         .eq("provider_message_id", sgMessageId)
         .single();
 
@@ -146,6 +147,37 @@ serve(async (req) => {
         }).then(({ error: memErr }) => {
           if (memErr) console.warn("SendGrid memory write skipped:", memErr.message);
         });
+
+        // ── Phase 3.2.1: DLQ for hard bounces / spam complaints / unsubscribes ──
+        // SendGrid 5xx status code on a bounce = hard bounce (mailbox doesn't exist).
+        // 4xx = soft (transient), keep retryable — do not DLQ.
+        const statusStr = String(event.status ?? "");
+        const isHardBounce =
+          mappedType === "bounced" && (statusStr.startsWith("5") || event.type === "bounce");
+        const dlqKind: string | null =
+          mappedType === "spam_report"  ? "spam_complaint"
+          : mappedType === "unsubscribe" ? "unsubscribed"
+          : isHardBounce                 ? "hard_bounce"
+          : null;
+
+        if (dlqKind && message.workspace_id) {
+          supabaseAdmin.from("email_dlq").insert({
+            workspace_id:      message.workspace_id,
+            sender_account_id: message.sender_account_id,
+            message_id:        message.id,
+            to_email:          message.to_email,
+            kind:              dlqKind,
+            reason:            event.reason ?? event.response ?? null,
+            metadata: {
+              sg_event_id:   event.sg_event_id,
+              sg_message_id: event.sg_message_id,
+              status:        event.status,
+              type:          event.type,
+            },
+          }).then(({ error: dlqErr }) => {
+            if (dlqErr) console.warn("SendGrid DLQ write skipped:", dlqErr.message);
+          });
+        }
       }
     }
 
