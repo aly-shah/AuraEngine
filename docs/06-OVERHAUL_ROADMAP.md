@@ -28,6 +28,7 @@ This document tracks the phased rollout. Phase 1 is shipped in code on this bran
 | DB refinement: `email_messages.workspace_id`, `email_dlq` FK correction, deprecation comments on `ai_prompts` / `ai_usage_logs` / `email_provider_configs` / `strategy_tasks` / `strategy_notes` / legacy `leads` columns | `supabase/migrations/20260508400000_db_refinement.sql` | ✅ |
 | Phase 3.2.1 send-path data migration + counters + DLQ wiring (credential source still legacy) | `supabase/migrations/20260508500000_send_path_data_migration.sql` + 3 edge function updates | ✅ |
 | Phase 3.2.2 credential source swap — send-email reads from `sender_account_secrets` first, legacy `email_provider_configs` as defensive fallback | `supabase/functions/send-email/index.ts` (`loadSenderAccountCreds` helper) | ✅ |
+| DB refinement pass #2: re-point 8 `workspace_id` FKs from `profiles(id)` → `workspaces(id)` (canonical), add 5 missing `workspace_id` indexes | `supabase/migrations/20260509000000_db_refinement_pass2.sql` | ✅ |
 
 **Why these and not others.** Phase 1 had to be additive and reversible. Memory is foundational (everything in Phase 2 builds on it). Navigation pillars set the product story. Mission Control proves the AI-native pattern without removing the existing dashboard. Centralised AI config removes the friction tax on every future model upgrade. Nothing here touches the email send path, billing, RLS posture, or existing user data.
 
