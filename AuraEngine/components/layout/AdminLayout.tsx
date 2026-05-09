@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { BRAND } from '../../lib/brand';
+import { canEnterSupport } from '../../lib/permissions';
 import ErrorBoundary from '../ErrorBoundary';
 import PortalContentSkeleton from '../skeletons/PortalContentSkeleton';
 import { AppShell } from './AppShell';
@@ -39,7 +40,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ user, onLogout }) => {
     { label: 'Command Center', path: '/admin/command', icon: <Terminal size={20} /> },
   ];
 
-  if (user?.is_super_admin) {
+  if (canEnterSupport(user)) {
     navItems.push({ label: 'Support Console', path: '/admin/support', icon: <Headphones size={20} /> });
   }
 

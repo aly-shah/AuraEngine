@@ -9,6 +9,7 @@ import {
   getTargetProfile,
 } from '../../lib/support';
 import { logSupportAction } from '../../lib/supportAudit';
+import { canEnterSupport } from '../../lib/permissions';
 
 interface SupportContextValue {
   /** The logged-in admin's user ID (available even without an active session) */
@@ -50,7 +51,7 @@ export const SupportProvider: React.FC<Props> = ({ user, children }) => {
   const [isImpersonating, setIsImpersonating] = useState(false);
   const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isSuperAdmin = user?.role === 'ADMIN' && (user as unknown as Record<string, unknown>).is_super_admin === true;
+  const isSuperAdmin = canEnterSupport(user);
   const supportEnabled = import.meta.env.VITE_SUPPORT_MODE_ENABLED === 'true';
 
   // Schedule auto-expiry
