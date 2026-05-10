@@ -73,7 +73,9 @@ jobs:
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts 2>/dev/null
           SSH_CMD="ssh -i ~/.ssh/deploy_key"
           $SSH_CMD $USER@$HOST "mkdir -p /var/www/scaliyo/scripts"
-          rsync -azq --chmod=F755 --delete -e "$SSH_CMD" scripts/ $USER@$HOST:/var/www/scaliyo/scripts/
+          rsync -av --delete -e "$SSH_CMD" scripts/ $USER@$HOST:/var/www/scaliyo/scripts/
+          # Force exec bit on .sh files in case the source filesystem dropped it.
+          $SSH_CMD $USER@$HOST "chmod 755 /var/www/scaliyo/scripts/*.sh"
 
       - name: Check if Nginx config changed
         id: nginx-check
