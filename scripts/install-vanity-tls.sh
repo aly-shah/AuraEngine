@@ -17,7 +17,7 @@
 set -euo pipefail
 
 ACME_DIR="/var/www/scaliyo/acme"
-VANITY_DIR="/etc/nginx/sites-enabled/vanity"
+VANITY_DIR="/etc/nginx/scaliyo-vanity"
 ENV_FILE="/etc/scaliyo/scaliyo.env"
 CRON_FILE="/etc/cron.d/scaliyo-vanity-tls"
 POLL_SCRIPT="/var/www/scaliyo/scripts/poll-vanity-domains.sh"

@@ -21,7 +21,7 @@ set -euo pipefail
 DOMAIN="${1:-}"
 EMAIL="${LETSENCRYPT_EMAIL:-admin@scaliyo.com}"
 WEBROOT="/var/www/scaliyo/acme"
-ENABLED_DIR="/etc/nginx/sites-enabled/vanity"
+ENABLED_DIR="/etc/nginx/scaliyo-vanity"
 CONF_FILE="${ENABLED_DIR}/${DOMAIN}.conf"
 TEMPLATE="${VANITY_TEMPLATE:-/var/www/scaliyo/scripts/vanity-server-block.conf.tmpl}"
 LIVE_DIR="/etc/letsencrypt/live/${DOMAIN}"
