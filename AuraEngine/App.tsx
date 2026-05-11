@@ -12,7 +12,7 @@ import { useAuthMachine } from './hooks/useAuthMachine';
 import { AuthGate } from './components/auth/AuthGate';
 import { useIsMobile } from './hooks/useIsMobile';
 import { canEnterAdmin, canEnterSupport } from './lib/permissions';
-import { loadBranding, applyBrandingToDocument } from './lib/branding';
+import { loadBranding, loadBrandingByHost, applyBrandingToDocument } from './lib/branding';
 
 // Dev perf panel — lazy-loaded, tree-shaken in production
 const PerfPanel = lazy(() => import('./components/dev/PerfPanel'));
@@ -75,6 +75,7 @@ const SocialScheduler = lazy(() => import('./pages/portal/SocialScheduler'));
 const TeamHubBoards = lazy(() => import('./pages/portal/team-hub/TeamHubPage'));
 const SenderAccountsPage = lazy(() => import('./pages/portal/SenderAccountsPage'));
 const ApiKeysPage = lazy(() => import('./pages/portal/ApiKeysPage'));
+const ApiDocsPage = lazy(() => import('./pages/portal/ApiDocsPage'));
 const WebhooksPage = lazy(() => import('./pages/portal/WebhooksPage'));
 const BrandingPage = lazy(() => import('./pages/portal/BrandingPage'));
 
@@ -170,17 +171,28 @@ const App: React.FC = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const qc = useQueryClient();
 
-  // Phase 4.6.a — apply per-workspace branding once we have a user.
-  // Best-effort; failure leaves platform defaults in place.
+  // Phase 4.6.b — pre-login branding from Host header. Runs ONCE at mount.
+  // If the SPA is being served from a verified vanity domain, fetch and
+  // apply that workspace's branding immediately so the auth page renders
+  // branded before any user logs in. Platform hosts return null and leave
+  // defaults in place. The user-keyed effect below overrides once auth
+  // resolves (workspace branding for the logged-in user wins post-login).
   useEffect(() => {
-    if (!user?.id) {
-      applyBrandingToDocument(null);
-      return;
-    }
+    let cancelled = false;
+    loadBrandingByHost(window.location.hostname).then((b) => {
+      if (!cancelled && b) applyBrandingToDocument(b);
+    }).catch(() => { /* keep platform defaults */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Phase 4.6.a — apply per-workspace branding once we have a user.
+  // Best-effort; failure leaves whatever the host-based effect put down.
+  useEffect(() => {
+    if (!user?.id) return;
     let cancelled = false;
     loadBranding(user.id).then((b) => {
-      if (!cancelled) applyBrandingToDocument(b);
-    }).catch(() => { /* keep defaults */ });
+      if (!cancelled && b) applyBrandingToDocument(b);
+    }).catch(() => { /* keep current branding */ });
     return () => { cancelled = true; };
   }, [user?.id]);
 
@@ -318,6 +330,7 @@ const App: React.FC = () => {
             <Route path="team-hub" element={<TeamHubBoards />} />
             <Route path="sender-accounts" element={<SenderAccountsPage />} />
             <Route path="api-keys" element={<ApiKeysPage />} />
+            <Route path="api-docs" element={<ApiDocsPage />} />
             <Route path="webhooks" element={<WebhooksPage />} />
             <Route path="branding" element={<BrandingPage />} />
           </Route>

@@ -67,6 +67,63 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      summary: Create a lead
+      operationId: createLead
+      tags: [Leads]
+      security:
+        - apiKey: [leads.write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeadCreate" }
+      responses:
+        "201":
+          description: Lead created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Lead" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    patch:
+      summary: Update a lead
+      operationId: updateLead
+      tags: [Leads]
+      security:
+        - apiKey: [leads.write]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LeadPatch" }
+      responses:
+        "200":
+          description: Lead updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Lead" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1-sequences:
     get:
@@ -99,6 +156,55 @@ paths:
                   limit: { type: integer }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      summary: Create an email sequence (draft template)
+      description: Creates the sequence row. Starting an actual send run is a separate workflow.
+      operationId: createSequence
+      tags: [Campaigns]
+      security:
+        - apiKey: [campaigns.write]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SequenceCreate" }
+      responses:
+        "201":
+          description: Sequence created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Sequence" }
+    patch:
+      summary: Update an email sequence
+      operationId: updateSequence
+      tags: [Campaigns]
+      security:
+        - apiKey: [campaigns.write]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SequencePatch" }
+      responses:
+        "200":
+          description: Sequence updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Sequence" }
 
   /v1-campaigns:
     get:
@@ -172,6 +278,15 @@ components:
       in: query
       schema: { type: string, format: date-time }
       description: Paginate by descending `created_at`. Pass the `next_cursor` from the prior response.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, maxLength: 128 }
+      description: |
+        Optional client-supplied key. If two requests within 24h carry the same key
+        AND the same body hash, the second returns the cached response (with
+        header `X-Scaliyo-Idempotent-Replay: true`). If the key is reused with a
+        DIFFERENT body, the second request gets 409 `idempotency_conflict`.
 
   responses:
     Unauthorized:
@@ -198,6 +313,16 @@ components:
         Retry-After:
           schema: { type: integer }
           description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Idempotency conflict or duplicate row
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -248,6 +373,42 @@ components:
         total_sent:   { type: integer }
         created_at:   { type: string, format: date-time }
         updated_at:   { type: string, format: date-time }
+
+    LeadCreate:
+      type: object
+      required: []   # At-least-one-of is enforced server-side, not via JSON Schema
+      properties:
+        first_name:    { type: string }
+        last_name:     { type: string }
+        primary_email: { type: string, description: "One of primary_email / primary_phone / linkedin_url is required" }
+        primary_phone: { type: string }
+        linkedin_url:  { type: string }
+        company:       { type: string }
+        title:         { type: string }
+        industry:      { type: string }
+        company_size:  { type: string }
+        location:      { type: string }
+        source:        { type: string }
+        score:         { type: integer, minimum: 0, maximum: 100 }
+        status:        { type: string, enum: [New, Contacted, Qualified, Converted, Lost] }
+        insights:      { type: string }
+        custom_fields: { type: object }
+
+    LeadPatch:
+      $ref: "#/components/schemas/LeadCreate"
+
+    SequenceCreate:
+      type: object
+      required: [name]
+      properties:
+        name:        { type: string }
+        description: { type: string }
+        status:      { type: string, enum: [draft, active, paused, completed, archived] }
+        goal:        { type: string }
+        tone:        { type: string }
+
+    SequencePatch:
+      $ref: "#/components/schemas/SequenceCreate"
 
     Campaign:
       type: object

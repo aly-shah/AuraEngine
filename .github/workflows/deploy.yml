@@ -67,15 +67,18 @@ jobs:
           USER: ${{ secrets.DEPLOY_USER }}
         working-directory: .
         run: |
+          set -euxo pipefail
+          # Diagnostics: what's in scripts/ on the runner?
+          ls -la scripts/
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H $HOST >> ~/.ssh/known_hosts 2>/dev/null
-          SSH_CMD="ssh -i ~/.ssh/deploy_key"
-          $SSH_CMD $USER@$HOST "mkdir -p /var/www/scaliyo/scripts"
-          rsync -av --delete -e "$SSH_CMD" scripts/ $USER@$HOST:/var/www/scaliyo/scripts/
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new"
+          $SSH_CMD "$USER@$HOST" "mkdir -p /var/www/scaliyo/scripts && id && ls -la /var/www/scaliyo/scripts/ || true"
+          rsync -av --delete -e "$SSH_CMD" scripts/ "$USER@$HOST:/var/www/scaliyo/scripts/"
           # Force exec bit on .sh files in case the source filesystem dropped it.
-          $SSH_CMD $USER@$HOST "chmod 755 /var/www/scaliyo/scripts/*.sh"
+          $SSH_CMD "$USER@$HOST" "chmod 755 /var/www/scaliyo/scripts/*.sh && ls -la /var/www/scaliyo/scripts/"
 
       - name: Check if Nginx config changed
         id: nginx-check
@@ -89,7 +92,10 @@ jobs:
 
       - name: Sync Nginx config & reload
         if: steps.nginx-check.outputs.changed == 'true'
-        continue-on-error: true
+        # NOTE: requires NOPASSWD for `cp /var/www/scaliyo/nginx-staged.conf
+        # /etc/nginx/sites-available/aurafunnel.conf` in /etc/sudoers.d/scaliyo-certbot.
+        # Without that rule, the `sudo -n cp` below silently fails. See
+        # docs/06-OVERHAUL_ROADMAP.md for the one-line setup.
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           HOST: ${{ secrets.DEPLOY_HOST }}
@@ -101,7 +107,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H $HOST >> ~/.ssh/known_hosts 2>/dev/null
           SSH_CMD="ssh -i ~/.ssh/deploy_key"
-          rsync -azq -e "$SSH_CMD" nginx/aurafunnel.conf $USER@$HOST:/var/www/scaliyo/nginx-staged.conf
+          rsync -av -e "$SSH_CMD" nginx/aurafunnel.conf $USER@$HOST:/var/www/scaliyo/nginx-staged.conf
           $SSH_CMD $USER@$HOST "sudo -n cp /var/www/scaliyo/nginx-staged.conf /etc/nginx/sites-available/aurafunnel.conf && sudo -n nginx -t && sudo -n systemctl reload nginx"
 
       - name: Check if backend changed

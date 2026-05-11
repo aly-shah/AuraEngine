@@ -216,6 +216,122 @@ async function handlePost(
   return jsonResponse(responseBody, responseStatus, corsHeaders);
 }
 
+// ── PATCH handler (partial update by ?id=<uuid>) ────────────────────────
+
+async function handlePatch(
+  req: Request,
+  auth: ApiAuth,
+  corsHeaders: Record<string, string>,
+): Promise<Response> {
+  const url = new URL(req.url);
+  const id = url.searchParams.get("id");
+  if (!id || !/^[0-9a-f-]{36}$/i.test(id)) {
+    return jsonResponse({ error: "?id=<uuid> required", code: "missing_id" }, 400, corsHeaders);
+  }
+
+  let bodyText: string;
+  try { bodyText = await req.text(); } catch { return jsonResponse({ error: "Failed to read body", code: "bad_request" }, 400, corsHeaders); }
+  if (!bodyText) return jsonResponse({ error: "Empty body", code: "bad_request" }, 400, corsHeaders);
+
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(bodyText); } catch { return jsonResponse({ error: "Invalid JSON", code: "bad_request" }, 400, corsHeaders); }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return jsonResponse({ error: "Body must be a JSON object", code: "bad_request" }, 400, corsHeaders);
+  }
+
+  // Build update payload from allowed fields only.
+  const patch: Record<string, unknown> = {};
+  const updatable = [
+    "first_name", "last_name", "primary_email", "primary_phone",
+    "company", "title", "industry", "company_size", "linkedin_url",
+    "location", "source", "score", "status", "insights", "custom_fields",
+  ];
+  for (const k of updatable) if (body[k] !== undefined) patch[k] = body[k];
+
+  if (Object.keys(patch).length === 0) {
+    return jsonResponse({ error: "No updatable fields provided", code: "no_fields" }, 400, corsHeaders);
+  }
+  if (patch.status !== undefined && !ALLOWED_STATUSES.has(String(patch.status))) {
+    return jsonResponse({
+      error: `status must be one of ${[...ALLOWED_STATUSES].join(", ")}`,
+      code: "invalid_status",
+    }, 400, corsHeaders);
+  }
+  if (patch.score !== undefined) {
+    const s = Number(patch.score);
+    if (!Number.isFinite(s) || s < 0 || s > 100) {
+      return jsonResponse({ error: "score must be 0..100", code: "invalid_score" }, 400, corsHeaders);
+    }
+    patch.score = Math.round(s);
+  }
+  if (typeof patch.primary_email === "string") {
+    patch.primary_email = patch.primary_email.trim().toLowerCase();
+  }
+
+  // Idempotency check (same shape as POST).
+  const idempotencyKey = req.headers.get("Idempotency-Key");
+  const requestHash = await sha256Hex(`PATCH:${id}:${bodyText}`);
+  const admin = adminClient();
+
+  if (idempotencyKey) {
+    const { data: cached } = await admin
+      .from("api_idempotency")
+      .select("request_hash, response_status, response_body")
+      .eq("workspace_id", auth.workspaceId)
+      .eq("key", idempotencyKey)
+      .maybeSingle();
+    if (cached) {
+      if (cached.request_hash !== requestHash) {
+        return jsonResponse({
+          error: "Idempotency-Key was reused with a different request",
+          code: "idempotency_conflict",
+        }, 409, corsHeaders);
+      }
+      return new Response(JSON.stringify(cached.response_body), {
+        status: cached.response_status,
+        headers: { ...corsHeaders, "Content-Type": "application/json", "X-Scaliyo-Idempotent-Replay": "true" },
+      });
+    }
+  }
+
+  // Apply update with workspace_id + id constraint so an attacker can't
+  // patch another workspace's lead by guessing a UUID.
+  const { data: updated, error: updateErr } = await admin
+    .from("leads")
+    .update(patch)
+    .eq("id", id)
+    .eq("workspace_id", auth.workspaceId)
+    .select(COLUMNS)
+    .single();
+
+  if (updateErr) {
+    console.error("[v1-leads PATCH] update error:", updateErr.message);
+    return jsonResponse({ error: "Update failed", code: "update_failed" }, 500, corsHeaders);
+  }
+  if (!updated) {
+    return jsonResponse({ error: "Lead not found", code: "not_found" }, 404, corsHeaders);
+  }
+
+  const responseBody = { data: updated };
+  const responseStatus = 200;
+
+  if (idempotencyKey) {
+    admin.from("api_idempotency").insert({
+      workspace_id:    auth.workspaceId,
+      key:             idempotencyKey,
+      api_key_id:      auth.apiKeyId,
+      endpoint:        "PATCH /v1-leads",
+      request_hash:    requestHash,
+      response_status: responseStatus,
+      response_body:   responseBody,
+    }).then(({ error }) => {
+      if (error) console.warn("[v1-leads PATCH] idempotency persist failed:", error.message);
+    });
+  }
+
+  return jsonResponse(responseBody, responseStatus, corsHeaders);
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -232,6 +348,11 @@ serve(async (req) => {
     const auth = await authenticateApiKey(req, { requiredScope: "leads.write", corsHeaders });
     if (!auth.ok) return auth.response;
     return handlePost(req, auth.auth, corsHeaders);
+  }
+  if (req.method === "PATCH") {
+    const auth = await authenticateApiKey(req, { requiredScope: "leads.write", corsHeaders });
+    if (!auth.ok) return auth.response;
+    return handlePatch(req, auth.auth, corsHeaders);
   }
   return jsonResponse({ error: "Method not allowed", code: "method_not_allowed" }, 405, corsHeaders);
 });
