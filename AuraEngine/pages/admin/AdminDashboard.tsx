@@ -255,10 +255,10 @@ const AdminDashboard: React.FC = () => {
         supabase.from('leads').select('id', { count: 'exact', head: true }).gte('created_at', yesterdayStart).lt('created_at', todayStart),
         supabase.from('ai_usage_logs').select('id', { count: 'exact', head: true }),
         supabase.from('subscriptions').select('plan_name').eq('status', 'active'),
-        supabase.from('profiles').select('id, plan, createdAt').gte('createdAt', new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+        supabase.from('profiles').select('id, plan, createdAt:created_at').gte('created_at', new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()),
         supabase.auth.getSession(),
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('profiles').select('id, name, email, plan, createdAt').order('createdAt', { ascending: false }).limit(5),
+        supabase.from('profiles').select('id, name, email, plan, createdAt:created_at').order('created_at', { ascending: false }).limit(5),
         supabase.auth.getSession().then(async ({ data: s }) => {
           if (s?.session?.user?.id) {
             const { data } = await supabase.from('profiles').select('name').eq('id', s.session.user.id).single();

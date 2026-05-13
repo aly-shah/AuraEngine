@@ -37,11 +37,13 @@ const UserManagement: React.FC = () => {
       const { data, error } = await supabase
         .from('profiles')
         .select('*, subscription:subscriptions(*)')
-        .order('createdAt', { ascending: false });
+        .order('created_at', { ascending: false });
 
       if (data) {
         setUsers(data.map(u => ({
           ...u,
+          // User type uses camelCase createdAt; alias from the snake_case DB column.
+          createdAt: (u as { createdAt?: string; created_at?: string }).createdAt ?? (u as { created_at?: string }).created_at,
           subscription: Array.isArray(u.subscription) ? u.subscription[0] : u.subscription
         })));
       }

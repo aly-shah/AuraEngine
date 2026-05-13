@@ -107,9 +107,9 @@ export async function getSessionHistory(adminId: string, limit = 50): Promise<Su
 export async function searchUsers(query: string): Promise<TargetProfile[]> {
   const { data } = await supabase
     .from('profiles')
-    .select('id, email, name, role, status, plan, credits_total, credits_used, createdAt')
+    .select('id, email, name, role, status, plan, credits_total, credits_used, createdAt:created_at')
     .or(`email.ilike.%${query}%,name.ilike.%${query}%`)
-    .order('createdAt', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(25);
 
   return (data ?? []) as TargetProfile[];
@@ -118,7 +118,7 @@ export async function searchUsers(query: string): Promise<TargetProfile[]> {
 export async function getTargetProfile(userId: string): Promise<TargetProfile | null> {
   const { data } = await supabase
     .from('profiles')
-    .select('id, email, name, role, status, plan, credits_total, credits_used, createdAt')
+    .select('id, email, name, role, status, plan, credits_total, credits_used, createdAt:created_at')
     .eq('id', userId)
     .single();
 
