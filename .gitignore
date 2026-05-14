@@ -10,3 +10,5 @@ landing-page-copy.md
 portal-navigation-export.json
 ux-audit-export.json
 ux-audit-export.md
+# System-snapshot dumps — outputs of /export commands, not source.
+SCALIYO_*.md
