@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import {
   PieChart, MessageSquare, Zap, Plug, Settings,
-  CreditCard, HelpCircle, BookOpen, LogOut, ChevronRight,
+  CreditCard, HelpCircle, BookOpen, LogOut, ChevronRight, ExternalLink,
   Send, LayoutGrid, SlidersHorizontal, Target,
 } from 'lucide-react';
 import type { User } from '../../../types';
@@ -95,19 +95,25 @@ const MobileMore: React.FC = () => {
         <div key={section.title}>
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-2 px-1">{section.title}</p>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm divide-y divide-gray-50">
-            {section.items.map(item => (
-              <button
-                key={item.label}
-                onClick={() => navigate(item.path)}
-                className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-gray-50 transition-colors"
-              >
-                <div className={`w-8 h-8 rounded-lg bg-${item.color}-50 flex items-center justify-center`}>
-                  <item.icon size={16} className={`text-${item.color}-600`} />
-                </div>
-                <span className="text-sm font-semibold text-gray-700 flex-1">{item.label}</span>
-                <ChevronRight size={14} className="text-gray-300" />
-              </button>
-            ))}
+            {section.items.map(item => {
+              const isMobileNative = item.path.startsWith('/portal/mobile');
+              return (
+                <button
+                  key={item.label}
+                  onClick={() => navigate(item.path)}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-gray-50 transition-colors"
+                >
+                  <div className={`w-8 h-8 rounded-lg bg-${item.color}-50 flex items-center justify-center`}>
+                    <item.icon size={16} className={`text-${item.color}-600`} />
+                  </div>
+                  <span className="text-sm font-semibold text-gray-700 flex-1">{item.label}</span>
+                  {isMobileNative
+                    ? <ChevronRight size={14} className="text-gray-300" />
+                    : <ExternalLink size={12} className="text-gray-300" />
+                  }
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
-import { ArrowLeft, Mail, Phone, Globe, Linkedin, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Globe, Linkedin, ExternalLink } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { cacheKeys, staleTimes } from '../../../lib/cacheKeys';
@@ -162,13 +162,17 @@ const MobileLeadDetail: React.FC = () => {
           </div>
         )}
 
-        {/* View full profile link */}
+        {/* Open on desktop — notes, activity timeline, sequence enrollments
+            and the deeper enrichment surface aren't yet mobile-native. */}
         <button
           onClick={() => navigate(`/portal/leads/${lead.id}`)}
           className="w-full flex items-center justify-between bg-white rounded-2xl p-4 border border-gray-100 shadow-sm active:scale-[0.98] transition-transform"
         >
-          <span className="text-sm font-bold text-indigo-600">View full profile</span>
-          <ChevronRight size={16} className="text-indigo-400" />
+          <div className="flex flex-col items-start">
+            <span className="text-sm font-bold text-indigo-600">Open on desktop</span>
+            <span className="text-[10px] text-gray-400 mt-0.5">Notes, activity, sequences</span>
+          </div>
+          <ExternalLink size={14} className="text-indigo-400" />
         </button>
       </div>
     </div>
