@@ -121,7 +121,12 @@ function PortalGuard({ user, onLogout, refreshProfile }: { user: User; onLogout:
     return <Navigate to={`/portal/billing?plan=${storedPlan}`} replace />;
   }
 
-  if (isMobile) {
+  // Mobile users get redirected to the mobile shell from the bare /portal
+  // entry point only. If they navigate to a specific desktop sub-route
+  // (e.g. clicking "Billing" from /portal/mobile/more), they see the
+  // desktop layout — cramped but functional — instead of being trapped
+  // in the 6-page mobile portal.
+  if (isMobile && location.pathname === '/portal') {
     return <Navigate to="/portal/mobile" replace />;
   }
   return <ClientLayout user={user} onLogout={onLogout} refreshProfile={refreshProfile} />;

@@ -3,7 +3,7 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import {
   PieChart, MessageSquare, Zap, Plug, Settings,
   CreditCard, HelpCircle, BookOpen, LogOut, ChevronRight,
-  Send, LayoutGrid, SlidersHorizontal,
+  Send, LayoutGrid, SlidersHorizontal, Target,
 } from 'lucide-react';
 import type { User } from '../../../types';
 import { TIER_LIMITS, resolvePlanName } from '../../../lib/credits';
@@ -24,6 +24,7 @@ const MENU_SECTIONS: { title: string; items: MenuItem[] }[] = [
   {
     title: 'Tools',
     items: [
+      { label: 'Goals', icon: Target, path: '/portal/goals', color: 'indigo' },
       { label: 'Reports', icon: PieChart, path: '/portal/analytics', color: 'indigo' },
       { label: 'AI Assistant', icon: MessageSquare, path: '/portal/ai', color: 'violet' },
       { label: 'Tasks', icon: Zap, path: '/portal/strategy', color: 'amber' },

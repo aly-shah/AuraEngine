@@ -1,6 +1,8 @@
 import React from 'react';
 import { useOutletContext } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useRealtimeJobs } from '../../../hooks/useRealtimeJobs';
+import { resolveWorkspaceForUser } from '../../../lib/memory';
 import type { User } from '../../../types';
 import type { Job } from '../../../lib/jobs';
 
@@ -32,7 +34,12 @@ function formatTime(iso: string): string {
 
 const MobileActivity: React.FC = () => {
   const { user } = useOutletContext<LayoutContext>();
-  const { jobs, mode, connectionStatus, refresh } = useRealtimeJobs({ workspaceId: user.id, limit: 50 });
+  const { data: workspaceId = null } = useQuery<string | null>({
+    queryKey: ['mobile-activity-workspace', user.id],
+    queryFn: () => resolveWorkspaceForUser(user.id),
+    staleTime: 5 * 60_000,
+  });
+  const { jobs, mode, connectionStatus, refresh } = useRealtimeJobs({ workspaceId, limit: 50 });
 
   return (
     <div className="px-4 py-5 space-y-4">

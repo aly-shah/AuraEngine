@@ -5,6 +5,7 @@ import {
   Target, BarChart3, Upload, FileText, ChevronRight, RefreshCw,
   CreditCard, Send, Eye, MousePointer, Bell, Brain,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useRealtimeJobs } from '../../../hooks/useRealtimeJobs';
 import { supabase } from '../../../lib/supabase';
 import { normalizeLeads } from '../../../lib/queries';
@@ -44,7 +45,12 @@ function leadStatusColor(status: string): string {
 const MobileHome: React.FC = () => {
   const { user, refreshProfile } = useOutletContext<LayoutContext>();
   const navigate = useNavigate();
-  const { jobs, connectionStatus } = useRealtimeJobs({ workspaceId: user.id, limit: 5 });
+  const { data: workspaceId = null } = useQuery<string | null>({
+    queryKey: ['mobile-home-workspace', user.id],
+    queryFn: () => resolveWorkspaceForUser(user.id),
+    staleTime: 5 * 60_000,
+  });
+  const { jobs, connectionStatus } = useRealtimeJobs({ workspaceId, limit: 5 });
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
@@ -251,7 +257,7 @@ const MobileHome: React.FC = () => {
       {/* ═══════════════════════════════════════════════════════ */}
       <div className="px-4">
         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-          <button onClick={() => navigate('/portal/leads')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 whitespace-nowrap shadow-sm active:scale-95 transition-transform">
+          <button onClick={() => navigate('/portal/mobile/leads')} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 whitespace-nowrap shadow-sm active:scale-95 transition-transform">
             <Upload size={14} />
             <span>Import Leads</span>
           </button>
@@ -263,7 +269,7 @@ const MobileHome: React.FC = () => {
             <FileText size={14} />
             <span>Run Report</span>
           </button>
-          <button onClick={() => navigate('/portal/leads')} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold whitespace-nowrap shadow-lg shadow-indigo-100 active:scale-95 transition-transform">
+          <button onClick={() => navigate('/portal/mobile/leads')} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold whitespace-nowrap shadow-lg shadow-indigo-100 active:scale-95 transition-transform">
             + Add Lead
           </button>
         </div>
