@@ -99,17 +99,21 @@ const QuickLaunchPage: React.FC = () => {
   const [pasteLeads, setPasteLeads] = useState<Lead[]>([]);
   const [importOpen, setImportOpen] = useState(false);
 
-  const { data: existingLeads = [], refetch: refetchExisting } = useQuery<Lead[]>({
+  const { data: existingLeads = [], refetch: refetchExisting, isLoading: existingLoading } = useQuery<Lead[]>({
     queryKey: ['quick-launch-leads', workspaceId],
     queryFn: async () => {
       if (!workspaceId) return [];
-      const { data } = await supabase
+      // Don't pre-filter by email — surface everything we have, then warn
+      // at launch time if any rows are missing an address. Pre-filtering
+      // was making the section render empty when leads existed but
+      // hadn't been enriched yet.
+      const { data, error } = await supabase
         .from('leads')
         .select('id, first_name, last_name, primary_email, primary_phone, company, score, status, insights, title, industry')
         .eq('workspace_id', workspaceId)
-        .not('primary_email', 'is', null)
-        .order('score', { ascending: false })
+        .order('score', { ascending: false, nullsFirst: false })
         .limit(50);
+      if (error) console.warn('[quick-launch] leads query failed:', error.message);
       return ((data ?? []) as unknown[]).map((d) => ({
         ...(d as Record<string, unknown>),
         client_id: '', last_activity: '',
@@ -119,12 +123,14 @@ const QuickLaunchPage: React.FC = () => {
     staleTime: 60_000,
   });
 
+  const existingEmailable = existingLeads.filter((l) => /\S+@\S+\.\S+/.test(l.primary_email ?? ''));
+
   const activeLeads: Lead[] = useMemo(() => {
     if (mode === 'sample') return SAMPLE_LEADS;
     if (mode === 'paste') return pasteLeads;
-    if (mode === 'existing') return existingLeads;
+    if (mode === 'existing') return existingEmailable;
     return [];
-  }, [mode, pasteLeads, existingLeads]);
+  }, [mode, pasteLeads, existingEmailable]);
 
   const isSampleMode = mode === 'sample';
 
@@ -271,10 +277,43 @@ const QuickLaunchPage: React.FC = () => {
       }>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           <ModeButton active={mode === 'sample'} onClick={() => setMode('sample')} icon={Sparkles} label="Sample" hint="See how it works" />
-          <ModeButton active={mode === 'existing'} onClick={() => setMode('existing')} icon={Users} label="Existing" hint={`${existingLeads.length} in workspace`} />
+          <ModeButton active={mode === 'existing'} onClick={() => setMode('existing')} icon={Users} label="Existing" hint={
+            existingLoading ? 'Loading…'
+            : existingEmailable.length === 0 ? 'None available'
+            : `${existingEmailable.length} emailable`
+          } />
           <ModeButton active={mode === 'paste'} onClick={() => setMode('paste')} icon={Clipboard} label="Paste" hint="Emails or CSV rows" />
           <ModeButton active={mode === 'import'} onClick={() => { setMode('import'); setImportOpen(true); }} icon={Upload} label="Import CSV" hint="Full importer" />
         </div>
+
+        {mode === 'existing' && !existingLoading && (
+          workspaceId === null ? (
+            <div className="mt-4 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold">No workspace found for your account</p>
+                <p className="mt-0.5">You're signed in but not a member of any workspace. Use <span className="font-semibold">Paste</span> or <span className="font-semibold">Import CSV</span> to bring leads in directly.</p>
+              </div>
+            </div>
+          ) : existingEmailable.length === 0 ? (
+            <div className="mt-4 flex items-start gap-2 text-xs bg-slate-50 border border-slate-200 text-slate-700 rounded-lg p-3">
+              <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
+              <div>
+                <p className="font-semibold">
+                  {existingLeads.length === 0
+                    ? 'No leads in this workspace yet'
+                    : `${existingLeads.length} lead${existingLeads.length === 1 ? '' : 's'} in workspace, but none have an email address`}
+                </p>
+                <p className="mt-0.5">
+                  {existingLeads.length === 0
+                    ? 'Start with Paste or Import CSV — they accept emails directly.'
+                    : 'Add emails to your existing leads or use Paste / Import to launch a campaign now.'}
+                </p>
+                <p className="mt-1 text-[10px] text-slate-400 font-mono">workspace: {workspaceId.slice(0, 8)}…</p>
+              </div>
+            </div>
+          ) : null
+        )}
 
         {mode === 'paste' && (
           <div className="mt-4 space-y-2">
