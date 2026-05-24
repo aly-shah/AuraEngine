@@ -91,7 +91,7 @@ export const guideTours: GuideTour[] = [
         id: 'leads-add',
         target: '[data-guide="leads-add"]',
         title: 'Add New Leads',
-        description: 'Add leads manually, import from CSV, or search via Apollo integration.',
+        description: 'Add leads manually or import from CSV.',
         route: '/portal/leads',
       },
       {

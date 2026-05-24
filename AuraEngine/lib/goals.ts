@@ -5,9 +5,9 @@
 // The Planner takes a customer-stated goal (statement + target metric/value
 // + guardrails) and produces a structured AutomationPlan. The plan is
 // composed of canonical "automation primitives" — operations the existing
-// platform already knows how to run (Apollo search, sequence start, etc).
-// Phase 6.2 will add an executor that walks the plan and invokes those
-// primitives. For now the plan is descriptive only.
+// platform already knows how to run (lead enrichment, lead scoring,
+// sequence start, social post, etc). The goal-executor edge function
+// walks the plan and invokes those primitives.
 
 import { supabase } from './supabase';
 import { getGeminiClient } from './geminiClient';

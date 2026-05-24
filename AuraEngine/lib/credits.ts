@@ -14,11 +14,10 @@ export const TIER_LIMITS: Record<string, { credits: number; aiCredits: number; c
 };
 
 // ── Backward-compat plan name resolver ─────────────────────────────────────
-export function resolvePlanName(name: string): string {
-  if (name === 'Professional') return 'Growth';
-  if (name === 'Enterprise' || name === 'Business') return 'Scale';
-  return name;
-}
+// Canonical implementation lives in lib/plans.ts; re-exported here so the
+// many existing callsites that import from './credits' don't have to move.
+export { resolvePlanName } from './plans';
+import { resolvePlanName } from './plans';
 
 export function getPlanByName(name: string): PlanPackage | undefined {
   return PLANS.find(p => p.name === resolvePlanName(name));

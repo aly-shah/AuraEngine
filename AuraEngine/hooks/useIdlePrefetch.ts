@@ -16,7 +16,7 @@ const idlePrefetchTargets: Record<string, string[]> = {
   '/auth': ['/portal', '/signup', '/reset-password'],
   '/signup': ['/auth'],
   '/portal': ['/portal/leads', '/portal/ai', '/portal/content', '/portal/analytics'],
-  '/portal/leads': ['/portal', '/portal/leads/apollo', '/portal/intelligence'],
+  '/portal/leads': ['/portal', '/portal/intelligence'],
   '/portal/ai': ['/portal', '/portal/content', '/portal/content-studio'],
   '/portal/content': ['/portal', '/portal/content-studio', '/portal/blog'],
   '/portal/analytics': ['/portal', '/portal/leads', '/portal/automation'],

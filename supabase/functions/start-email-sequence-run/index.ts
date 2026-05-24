@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders, handleCors } from "../_shared/cors.ts";
+import { getMonthlyEmailLimit, resolvePlanName } from "../_shared/plans.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -109,21 +110,8 @@ serve(async (req) => {
       .eq("id", user.id)
       .single();
 
-    const rawPlan = profile?.plan ?? "Starter";
-    // Resolve legacy plan name aliases
-    const resolvedPlan =
-      rawPlan === "Professional"
-        ? "Growth"
-        : rawPlan === "Enterprise" || rawPlan === "Business"
-          ? "Scale"
-          : rawPlan;
-
-    const planLimits: Record<string, number> = {
-      Starter: 1000,
-      Growth: 10000,
-      Scale: 50000,
-    };
-    const limit = planLimits[resolvedPlan] ?? 1000;
+    const resolvedPlan = resolvePlanName(profile?.plan);
+    const limit = getMonthlyEmailLimit(resolvedPlan);
 
     if (currentUsage + totalItems > limit) {
       return new Response(

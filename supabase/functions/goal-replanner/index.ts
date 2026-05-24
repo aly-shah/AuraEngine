@@ -25,17 +25,9 @@
 // steps, address observed drift, keep what's working).
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders, handleCors } from "../_shared/cors.ts";
+import { adminClient, bearerToken, isServiceRoleToken } from "../_shared/auth.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-// Supabase migrated this project to the new sb_secret_* key format,
-// which gets auto-bound to SUPABASE_SERVICE_ROLE_KEY at edge-fn runtime.
-// pg_cron callers still use the legacy JWT (stored in vault). Accept
-// either so both paths work without forcing a coordinated rotation.
-const LEGACY_SERVICE_ROLE_KEY = Deno.env.get("LEGACY_SERVICE_ROLE_KEY") ?? "";
-const ACCEPTED_SERVICE_TOKENS = [SUPABASE_SERVICE_ROLE_KEY, LEGACY_SERVICE_ROLE_KEY].filter(Boolean);
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 
 const COOLDOWN_HOURS = 6;
@@ -114,14 +106,13 @@ serve(async (req) => {
 
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405, corsHeaders);
 
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return jsonResponse({ error: "Missing Authorization" }, 401, corsHeaders);
-  const token = authHeader.replace(/^Bearer\s+/i, "");
+  const token = bearerToken(req);
+  if (!token) return jsonResponse({ error: "Missing Authorization" }, 401, corsHeaders);
 
-  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const admin = adminClient();
 
   // Two callers: user JWT (manual replan from UI) OR service-role (cron sweep).
-  const isServiceRole = ACCEPTED_SERVICE_TOKENS.includes(token);
+  const isServiceRole = isServiceRoleToken(token);
   let userId: string | null = null;
   if (!isServiceRole) {
     const { data: userRes, error: authErr } = await admin.auth.getUser(token);

@@ -478,46 +478,6 @@ export interface Campaign {
   startedAt?: string;
 }
 
-// Module: Apollo Integration
-export interface ApolloContact {
-  id: string;
-  first_name: string;
-  last_name: string;
-  name: string;
-  title: string;
-  email: string;
-  linkedin_url: string;
-  city: string;
-  state: string;
-  country: string;
-  headline: string;
-  phone_numbers: { number: string }[];
-  organization: {
-    name?: string;
-    website_url?: string;
-    industry?: string;
-    estimated_num_employees?: number;
-  };
-}
-
-export interface ApolloSearchParams {
-  person_titles?: string[];
-  q_keywords?: string;
-  person_locations?: string[];
-  organization_locations?: string[];
-  employee_ranges?: string[];
-  q_organization_domains?: string[];
-  person_seniorities?: string[];
-  person_departments?: string[];
-  contact_email_status?: string[];
-  prospected_by_current_team?: string[];
-  organization_latest_funding_stage_cd?: string[];
-  organization_revenue_min?: number;
-  organization_revenue_max?: number;
-  page?: number;
-  per_page?: number;
-}
-
 // Module: Email Tracking
 export type EmailProvider = 'sendgrid' | 'mailchimp' | 'gmail' | 'smtp' | 'manual';
 export type EmailMessageStatus = 'sent' | 'delivered' | 'bounced' | 'failed';

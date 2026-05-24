@@ -24,27 +24,40 @@
 // Deploy: supabase functions deploy gemini-proxy
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { GoogleGenAI } from "https://esm.sh/@google/genai@1.0.0";
 import { getCorsHeaders, handleCors } from "../_shared/cors.ts";
+import { adminClient } from "../_shared/auth.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 
-// In-memory rate limiting: 60 req/min per user. Matches the Nginx zone.
-const rateLimitMap = new Map<string, number[]>();
-const RATE_LIMIT = 60;
-const RATE_WINDOW_MS = 60_000;
+// Cluster-wide rate limit (60 req/min per user) via Postgres consume_ai_rate_limit.
+// The previous in-memory Map only worked within a single worker, so a user
+// could exceed the cap by hitting multiple instances. Fail-open on RPC error
+// — transient DB issues shouldn't take AI offline.
+const RATE_LIMIT_PER_MIN = 60;
 
-function checkRateLimit(userId: string): boolean {
-  const now = Date.now();
-  const timestamps = rateLimitMap.get(userId) ?? [];
-  const recent = timestamps.filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) return false;
-  recent.push(now);
-  rateLimitMap.set(userId, recent);
-  return true;
+async function checkRateLimit(
+  admin: ReturnType<typeof adminClient>,
+  userId: string,
+): Promise<{ allowed: boolean; resetAt: string | null }> {
+  try {
+    const { data, error } = await admin.rpc("consume_ai_rate_limit", {
+      p_user_id: userId,
+      p_max_per_min: RATE_LIMIT_PER_MIN,
+    });
+    if (error) {
+      console.warn("[gemini-proxy] rate-limit RPC error, allowing:", error.message);
+      return { allowed: true, resetAt: null };
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      allowed: row?.allowed !== false,
+      resetAt: (row?.reset_at as string | undefined) ?? null,
+    };
+  } catch (e) {
+    console.warn("[gemini-proxy] rate-limit threw, allowing:", (e as Error).message);
+    return { allowed: true, resetAt: null };
+  }
 }
 
 interface ProxyRequest {
@@ -83,19 +96,28 @@ serve(async (req) => {
     return jsonResponse({ error: "Missing authorization header" }, 401, corsHeaders);
   }
 
-  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseAdmin = adminClient();
   const token = authHeader.replace("Bearer ", "");
   const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
   if (authError || !user) {
     return jsonResponse({ error: "Unauthorized" }, 401, corsHeaders);
   }
 
-  // ── Rate limit ──
-  if (!checkRateLimit(user.id)) {
-    return jsonResponse(
-      { error: "Rate limit exceeded. Please slow down." },
-      429,
-      corsHeaders,
+  // ── Rate limit (cluster-wide via Postgres) ──
+  const rl = await checkRateLimit(supabaseAdmin, user.id);
+  if (!rl.allowed) {
+    const retryAfter = rl.resetAt
+      ? Math.max(1, Math.ceil((new Date(rl.resetAt).getTime() - Date.now()) / 1000))
+      : 60;
+    return new Response(
+      JSON.stringify({
+        error: `Rate limit exceeded (${RATE_LIMIT_PER_MIN} req/min). Please slow down.`,
+        reset_at: rl.resetAt,
+      }),
+      {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+      },
     );
   }
 

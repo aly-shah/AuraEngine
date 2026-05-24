@@ -1,26 +1,37 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { GoogleGenAI } from "https://esm.sh/@google/genai@1.0.0";
 import { getCorsHeaders, handleCors } from "../_shared/cors.ts";
+import { adminClient } from "../_shared/auth.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 const MODEL_NAME = "gemini-3-flash-preview";
 
-// In-memory rate limiting: 20 requests/min per user
-const rateLimitMap = new Map<string, number[]>();
-const RATE_LIMIT = 20;
-const RATE_WINDOW_MS = 60_000;
+// Cluster-wide rate limit (20 req/min per user) via Postgres consume_ai_rate_limit.
+// Tighter than gemini-proxy because streaming sessions are heavier per request.
+const RATE_LIMIT_PER_MIN = 20;
 
-function checkRateLimit(userId: string): boolean {
-  const now = Date.now();
-  const timestamps = rateLimitMap.get(userId) ?? [];
-  const recent = timestamps.filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) return false;
-  recent.push(now);
-  rateLimitMap.set(userId, recent);
-  return true;
+async function checkRateLimit(
+  admin: ReturnType<typeof adminClient>,
+  userId: string,
+): Promise<{ allowed: boolean; resetAt: string | null }> {
+  try {
+    const { data, error } = await admin.rpc("consume_ai_rate_limit", {
+      p_user_id: userId,
+      p_max_per_min: RATE_LIMIT_PER_MIN,
+    });
+    if (error) {
+      console.warn("[ai-chat-stream] rate-limit RPC error, allowing:", error.message);
+      return { allowed: true, resetAt: null };
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return {
+      allowed: row?.allowed !== false,
+      resetAt: (row?.reset_at as string | undefined) ?? null,
+    };
+  } catch (e) {
+    console.warn("[ai-chat-stream] rate-limit threw, allowing:", (e as Error).message);
+    return { allowed: true, resetAt: null };
+  }
 }
 
 const MODE_SYSTEM_INSTRUCTIONS: Record<string, string> = {
@@ -50,7 +61,7 @@ serve(async (req) => {
       );
     }
 
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const supabaseAdmin = adminClient();
     const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
@@ -63,11 +74,21 @@ serve(async (req) => {
       );
     }
 
-    // Rate limit: 20 requests/min per user
-    if (!checkRateLimit(user.id)) {
+    // Rate limit: cluster-wide via Postgres
+    const rl = await checkRateLimit(supabaseAdmin, user.id);
+    if (!rl.allowed) {
+      const retryAfter = rl.resetAt
+        ? Math.max(1, Math.ceil((new Date(rl.resetAt).getTime() - Date.now()) / 1000))
+        : 60;
       return new Response(
-        JSON.stringify({ error: "Rate limit exceeded. Please wait a moment." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: `Rate limit exceeded (${RATE_LIMIT_PER_MIN} req/min). Please wait a moment.`,
+          reset_at: rl.resetAt,
+        }),
+        {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+        }
       );
     }
 

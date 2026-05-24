@@ -143,7 +143,7 @@ export async function getPlanByKey(key: string): Promise<DbPlan | null> {
 
 /** Get a plan by its name (e.g. 'Starter', 'Growth', 'Scale'). */
 export async function getPlanByName(planName: string): Promise<DbPlan | null> {
-  const resolved = resolveNameCompat(planName);
+  const resolved = resolvePlanName(planName);
   const plans = await getPlans();
   return plans.find(p => p.name === resolved) ?? null;
 }
@@ -152,19 +152,24 @@ export async function getPlanByName(planName: string): Promise<DbPlan | null> {
 export async function getPlanLimits(planName: string): Promise<PlanLimits> {
   const plan = await getPlanByName(planName);
   if (plan) return plan.limits;
-  const resolved = resolveNameCompat(planName);
+  const resolved = resolvePlanName(planName);
   return DEFAULT_LIMITS[resolved] ?? DEFAULT_LIMITS.Free;
 }
 
 /** Synchronous fallback for plan limits — uses hardcoded defaults only. */
 export function getPlanLimitsSync(planName: string): PlanLimits {
-  const resolved = resolveNameCompat(planName);
+  const resolved = resolvePlanName(planName);
   return DEFAULT_LIMITS[resolved] ?? DEFAULT_LIMITS.Free;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function resolveNameCompat(name: string): string {
+/**
+ * Canonical resolver for legacy plan-name aliases. Single source of truth —
+ * all other modules import from here (lib/credits.ts re-exports for
+ * back-compat; supabase/functions/_shared/plans.ts mirrors for Deno).
+ */
+export function resolvePlanName(name: string): string {
   if (name === 'Professional') return 'Growth';
   if (name === 'Enterprise' || name === 'Business') return 'Scale';
   return name;

@@ -154,7 +154,6 @@ const GoalsPage: React.FC = () => {
     if (next) {
       const ok = confirm(
         'Enabling Live execution lets the AI run automation primitives against your real data:\n\n' +
-        '• apollo_search — real Apollo API call (consumes Apollo credits)\n' +
         '• enrich_leads / lead_score — Gemini calls per lead\n' +
         '• team_task — creates real cards on the AI Goals board\n' +
         '• checkpoint — reads workspace metrics\n' +
@@ -179,8 +178,8 @@ const GoalsPage: React.FC = () => {
   const handleRunLive = async (g: AutomationGoal) => {
     if (!confirm(
       `Run "${g.statement}" in LIVE mode?\n\n` +
-      `This will perform real Apollo searches (consuming your Apollo credits) and read real workspace metrics. ` +
-      `Other primitives (enrich, score, sequence, social, team task, wait) will skip with a "deferred" status.`
+      `This executes the active plan's primitives against your real workspace data. ` +
+      `Email sending and social publishing are gated by separate per-workspace toggles.`
     )) return;
     try {
       const result = await runPlanLive(g.id);
@@ -491,7 +490,7 @@ const GoalCard: React.FC<{
                   onClick={async () => { setLiveRunning(true); try { await onRunLive(); } finally { setLiveRunning(false); } }}
                   disabled={liveRunning}
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50"
-                  title="Execute the plan for real — consumes Apollo credits"
+                  title="Execute the plan against real workspace data"
                 >
                   {liveRunning ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
                   Run live
