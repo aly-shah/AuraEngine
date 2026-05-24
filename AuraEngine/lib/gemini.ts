@@ -1126,19 +1126,32 @@ Rules:
 
   const systemInstruction = resolved.systemInstruction;
 
-  // Direct inference (grounding consistently returns empty for business analysis)
+  // Direct inference (grounding consistently returns empty for business analysis).
+  // Each attempt is bounded to ANALYSIS_TIMEOUT_MS so the wizard can never
+  // sit indefinitely if Gemini stalls. With MAX_RETRIES=3 and a 60s cap
+  // plus 1s/2s back-offs, worst-case total wait is ~183s before we surface
+  // a clear failure.
+  const ANALYSIS_TIMEOUT_MS = 60_000;
   let attempt = 0;
   while (attempt < MAX_RETRIES) {
     try {
-      const response = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: resolved.temperature,
-          topP: resolved.topP,
-        }
-      });
+      const response = await Promise.race([
+        ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            temperature: resolved.temperature,
+            topP: resolved.topP,
+          }
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Business analysis timed out after ${ANALYSIS_TIMEOUT_MS / 1000}s. The model is taking too long — try a simpler URL or skip to manual entry.`)),
+            ANALYSIS_TIMEOUT_MS,
+          )
+        ),
+      ]);
 
       const text = response.text;
       if (!text) throw new Error("Empty response from business analysis.");

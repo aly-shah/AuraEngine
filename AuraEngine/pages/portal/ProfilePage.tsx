@@ -154,6 +154,10 @@ const ProfilePage: React.FC = () => {
   });
   const [analysisStage, setAnalysisStage] = useState<AnalysisStage>('searching');
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisElapsed, setAnalysisElapsed] = useState(0);
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
+  const [analysisCancelled, setAnalysisCancelled] = useState(false);
+  const analysisCancelledRef = useRef(false);
   const [websiteUrl, setWebsiteUrl] = useState(user?.businessProfile?.companyWebsite || '');
   const [socialUrls, setSocialUrls] = useState({ linkedin: '', twitter: '', instagram: '', facebook: '' });
   const [showSocialInputs, setShowSocialInputs] = useState(false);
@@ -468,44 +472,58 @@ const ProfilePage: React.FC = () => {
     }
     setUrlError('');
     setAnalysisError('');
+    setAnalysisCancelled(false);
+    analysisCancelledRef.current = false;
     const fullUrl = websiteUrl.startsWith('http') ? websiteUrl : `https://${websiteUrl}`;
 
     // Immediate feedback: flip to the analyzing screen so the click never
     // feels dead. The progress + stages tick during the wait.
     setAnalysisStage('searching');
     setAnalysisProgress(8);
+    setAnalysisStartedAt(Date.now());
+    setAnalysisElapsed(0);
     setWizardPhase('analyzing');
 
     // Best-effort persistence — don't block the visible transition behind
-    // a Supabase round-trip. If it fails the user still gets the same
-    // wizard UI; we'll surface any error via the enrichment banner.
+    // a Supabase round-trip.
     void persistWizardInput(fullUrl);
 
-    // Tick the progress UI optimistically while Gemini works. Real progress
-    // signals from grounding chunks would be ideal, but until then this at
-    // least proves the click did something.
+    // Optimistic progress + elapsed-time tickers. Real progress signals
+    // from grounding chunks would be ideal; for now this proves the click
+    // did something and surfaces elapsed time prominently.
     const stageOrder: AnalysisStage[] = ['searching', 'reading', 'extracting', 'structuring'];
-    const ticker = setInterval(() => {
-      setAnalysisProgress((p) => Math.min(92, p + 3));
+    const progressTicker = setInterval(() => {
+      setAnalysisProgress((p) => Math.min(92, p + 2));
       setAnalysisStage((s) => {
         const i = stageOrder.indexOf(s);
         return i < stageOrder.length - 1 ? stageOrder[i + 1] : s;
       });
-    }, 1200);
+    }, 1500);
+    const elapsedTicker = setInterval(() => {
+      setAnalysisElapsed((e) => e + 1);
+    }, 1000);
 
     try {
       await startEnrichment(fullUrl, socialUrls);
+      if (analysisCancelledRef.current) return;
       setAnalysisProgress(100);
       setAnalysisStage('complete');
-      // Settle on the manual form so the user can review the merged data.
       setTimeout(() => setWizardPhase('manual'), 500);
     } catch (err) {
+      if (analysisCancelledRef.current) return;
       setAnalysisError((err as Error).message ?? 'Analysis failed.');
-      // Leave the user on the analyzing screen — the error banner is right there.
     } finally {
-      clearInterval(ticker);
+      clearInterval(progressTicker);
+      clearInterval(elapsedTicker);
     }
   };
+
+  const handleCancelAnalysis = useCallback(() => {
+    setAnalysisCancelled(true);
+    analysisCancelledRef.current = true;
+    setEnrichmentStatus('idle');
+    setWizardPhase('manual');
+  }, []);
 
   // Wizard: save profile (reused for all phases)
   const handleWizardSave = async () => {
@@ -1326,6 +1344,11 @@ const ProfilePage: React.FC = () => {
                 </div>
                 <h3 className="text-xl font-black text-slate-900 font-heading">Analyzing Your Business</h3>
                 <p className="text-sm text-slate-500 mt-2">Our AI is researching your company online...</p>
+                <p className="text-xs font-mono font-bold text-indigo-600 mt-3 tabular-nums">
+                  {Math.floor(analysisElapsed / 60)}:{String(analysisElapsed % 60).padStart(2, '0')} elapsed
+                  {analysisElapsed > 30 && analysisElapsed <= 60 && <span className="text-slate-400 font-normal ml-2">· this is taking a bit longer than usual</span>}
+                  {analysisElapsed > 60 && <span className="text-amber-600 font-normal ml-2">· still working — the model can take up to 60s per attempt</span>}
+                </p>
               </div>
 
               {/* Progress Bar */}
@@ -1338,6 +1361,19 @@ const ProfilePage: React.FC = () => {
                 </div>
                 <p className="text-xs font-bold text-slate-400 text-center">{analysisProgress}% complete</p>
               </div>
+
+              {/* Cancel button — always available while analyzing */}
+              {!analysisError && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleCancelAnalysis}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    Cancel and skip to manual entry
+                  </button>
+                </div>
+              )}
 
               {/* Stage Checklist */}
               <div className="space-y-3">
