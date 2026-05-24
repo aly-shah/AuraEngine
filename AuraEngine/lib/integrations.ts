@@ -85,45 +85,6 @@ export async function disconnectIntegration(provider: string): Promise<void> {
   if (error) throw new Error(`Failed to disconnect integration: ${error.message}`);
 }
 
-// ─── Legacy webhook shims ───
-//
-// The `webhooks` table was retired; outbound webhooks now live in
-// `webhook_endpoints` (workspace-scoped, event-driven). These shims keep
-// IntegrationHub's legacy webhook section from crashing while it's
-// migrated to the new flow at /portal/webhooks. They no-op silently.
-// Remove once IntegrationHub's webhook UI is gone.
-
-export interface LegacyWebhook {
-  id: string;
-  name: string;
-  url: string;
-  trigger_event: string;
-  is_active: boolean;
-  secret?: string;
-  last_fired?: string;
-  success_rate: number;
-  fire_count: number;
-  fail_count: number;
-}
-
-export async function fetchWebhooks(): Promise<LegacyWebhook[]> {
-  return [];
-}
-
-export async function upsertWebhook(
-  _webhook: Partial<LegacyWebhook> & { name: string; url: string; trigger_event: string },
-): Promise<LegacyWebhook> {
-  throw new Error('Outbound webhooks have moved — manage them at /portal/webhooks.');
-}
-
-export async function deleteWebhook(_id: string): Promise<void> {
-  // no-op
-}
-
-export async function updateWebhookStats(_id: string, _success: boolean): Promise<void> {
-  // no-op
-}
-
 // ─── Validation (calls edge function) ───
 
 export async function validateIntegration(

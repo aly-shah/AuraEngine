@@ -7,10 +7,6 @@ import {
   upsertIntegration,
   disconnectIntegration as disconnectIntegrationDb,
   validateIntegration,
-  fetchWebhooks as fetchWebhooksFromDb,
-  upsertWebhook,
-  deleteWebhook as deleteWebhookDb,
-  updateWebhookStats,
 } from '../../lib/integrations';
 import {
   PlugIcon, PlusIcon, CheckIcon, XIcon, RefreshIcon, CopyIcon, KeyIcon,
@@ -59,16 +55,6 @@ interface ApiKeyData {
   lastUsed: string;
   permissions: 'read' | 'readwrite';
   active: boolean;
-}
-
-interface WebhookData {
-  id: string;
-  name: string;
-  url: string;
-  trigger: string;
-  lastFired: string;
-  active: boolean;
-  successRate: number;
 }
 
 interface SyncHistoryEntry {
@@ -174,12 +160,6 @@ const DEFAULT_API_KEYS: ApiKeyData[] = [
   { id: 'dev', name: 'Development Key', keyPreview: 'af_test_...8a3b', fullKey: 'af_test_xxxx_xxxx_xxxx_xxxx_8a3b', lastUsed: '1 hour ago', permissions: 'read', active: true },
 ];
 
-const DEFAULT_WEBHOOKS: WebhookData[] = [
-  { id: 'wh1', name: 'New Lead to Slack', url: 'https://hooks.slack.com/services/T.../B.../xxx', trigger: 'When lead is created', lastFired: '14:32', active: true, successRate: 99.2 },
-  { id: 'wh2', name: 'Hot Lead Alert', url: 'https://api.yourapp.com/webhook/hot-lead', trigger: 'When lead score > 85', lastFired: '14:28', active: true, successRate: 97.8 },
-  { id: 'wh3', name: 'Daily Summary', url: 'https://api.yourapp.com/webhook/summary', trigger: 'Daily at 18:00 UTC', lastFired: '18:00', active: false, successRate: 100 },
-];
-
 const SYNC_STATS = {
   totalRecords: 12842,
   successRate: 99.8,
@@ -201,15 +181,12 @@ const IntegrationHub: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<IntegrationCategory>('all');
   const [integrations, setIntegrations] = useState<Integration[]>(DEFAULT_INTEGRATIONS);
   const [apiKeys, setApiKeys] = useState<ApiKeyData[]>(DEFAULT_API_KEYS);
-  const [webhooks, setWebhooks] = useState<WebhookData[]>(DEFAULT_WEBHOOKS);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showAddIntegration, setShowAddIntegration] = useState(false);
-  const [showAddWebhook, setShowAddWebhook] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean } | null>(null);
   const [showSyncLogs, setShowSyncLogs] = useState(false);
   const [showKeyFull, setShowKeyFull] = useState<string | null>(null);
-  const [webhookForm, setWebhookForm] = useState({ name: '', url: '', trigger: 'When lead is created' });
 
   // ─── Email Provider Setup Modal State ───
   const [emailSetupId, setEmailSetupId] = useState<string | null>(null);
@@ -261,20 +238,6 @@ const IntegrationHub: React.FC = () => {
         // Load email provider configs from DB
         const { data } = await supabase.from('email_provider_configs').select('provider, is_active, from_email, updated_at');
 
-        // Load webhooks from DB
-        const dbWebhooks = await fetchWebhooksFromDb();
-        if (dbWebhooks.length > 0) {
-          setWebhooks(dbWebhooks.map(wh => ({
-            id: wh.id,
-            name: wh.name,
-            url: wh.url,
-            trigger: wh.trigger_event,
-            lastFired: wh.last_fired || 'Never',
-            active: wh.is_active,
-            successRate: wh.success_rate,
-          })));
-        }
-
         setIntegrations(prev => prev.map(i => {
           // Email providers: check DB
           if (EMAIL_PROVIDERS.has(i.id)) {
@@ -322,19 +285,16 @@ const IntegrationHub: React.FC = () => {
   // ─── KPI Stats ───
   const kpiStats = useMemo(() => {
     const connectedCount = integrations.filter(i => i.status === 'connected').length;
-    const activeWebhooks = webhooks.filter(w => w.active).length;
-    const avgWebhookSuccess = webhooks.length > 0 ? webhooks.reduce((s, w) => s + w.successRate, 0) / webhooks.length : 0;
     const totalVolume = integrations.reduce((s, i) => s + i.dataVolume, 0);
 
     return [
       { label: 'Connected', value: `${connectedCount}/${integrations.length}`, icon: <PlugIcon className="w-5 h-5" />, color: 'indigo', trend: `${integrations.filter(i => i.status === 'partial').length} partial`, up: connectedCount > 0 },
       { label: 'Records Synced', value: SYNC_STATS.totalRecords.toLocaleString(), icon: <RefreshIcon className="w-5 h-5" />, color: 'emerald', trend: `${SYNC_STATS.successRate}% success rate`, up: true },
       { label: 'API Requests', value: API_USAGE.requestsToday.toLocaleString(), icon: <GlobeIcon className="w-5 h-5" />, color: 'blue', trend: `${API_USAGE.avgLatency}ms avg latency`, up: true },
-      { label: 'Active Webhooks', value: `${activeWebhooks}/${webhooks.length}`, icon: <ZapIcon className="w-5 h-5" />, color: 'amber', trend: `${avgWebhookSuccess.toFixed(1)}% avg success`, up: avgWebhookSuccess >= 95 },
       { label: 'Data Volume', value: `${totalVolume}%`, icon: <DatabaseIcon className="w-5 h-5" />, color: 'violet', trend: `${integrations.length} sources active`, up: true },
       { label: 'API Cost', value: `$${API_USAGE.costToday.toFixed(2)}`, icon: <TargetIcon className="w-5 h-5" />, color: 'fuchsia', trend: `${API_USAGE.currentUsagePct}% of rate limit`, up: API_USAGE.currentUsagePct < 80 },
     ];
-  }, [integrations, webhooks]);
+  }, [integrations]);
 
   // ─── Integration Health ───
   const integrationHealth = useMemo((): IntegrationHealthMetric[] => {
@@ -637,71 +597,11 @@ const IntegrationHub: React.FC = () => {
     setConfigureId(null);
   }, [configureId, configForm]);
 
-  const handleToggleWebhook = useCallback(async (id: string) => {
-    const wh = webhooks.find(w => w.id === id);
-    if (!wh) return;
-    try {
-      await upsertWebhook({ id, name: wh.name, url: wh.url, trigger_event: wh.trigger, is_active: !wh.active });
-      setWebhooks(prev => prev.map(w => w.id === id ? { ...w, active: !w.active } : w));
-    } catch (err) {
-      console.error('Failed to toggle webhook:', err);
-    }
-  }, [webhooks]);
-
-  const handleTestWebhook = useCallback(async (id: string) => {
-    setTestingId(`wh-${id}`);
-    setTestResult(null);
-    const wh = webhooks.find(w => w.id === id);
-    if (!wh) { setTestingId(null); return; }
-    try {
-      const res = await fetch(wh.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'test', timestamp: new Date().toISOString(), source: 'Scaliyo' }),
-      });
-      const success = res.ok;
-      await updateWebhookStats(id, success);
-      setTestResult({ id: `wh-${id}`, success });
-    } catch {
-      await updateWebhookStats(id, false).catch(() => {});
-      setTestResult({ id: `wh-${id}`, success: false });
-    }
-    setTestingId(null);
-  }, [webhooks]);
-
-  const handleAddWebhook = useCallback(async () => {
-    if (!webhookForm.name || !webhookForm.url) return;
-    try {
-      const saved = await upsertWebhook({
-        name: webhookForm.name,
-        url: webhookForm.url,
-        trigger_event: webhookForm.trigger,
-        is_active: true,
-      });
-      setWebhooks(prev => [...prev, {
-        id: saved.id,
-        name: saved.name,
-        url: saved.url,
-        trigger: saved.trigger_event,
-        lastFired: saved.last_fired || 'Never',
-        active: saved.is_active,
-        successRate: saved.success_rate,
-      }]);
-      setWebhookForm({ name: '', url: '', trigger: 'When lead is created' });
-      setShowAddWebhook(false);
-    } catch (err) {
-      console.error('Failed to add webhook:', err);
-    }
-  }, [webhookForm]);
-
   const handleExportConfig = useCallback(() => {
     const config = {
       integrations: integrations.map(i => ({
         name: i.name, category: i.category, status: i.status,
         syncDirection: i.syncDirection, objects: i.objects,
-      })),
-      webhooks: webhooks.map(w => ({
-        name: w.name, url: w.url, trigger: w.trigger, active: w.active,
       })),
       exportedAt: new Date().toISOString(),
       exportedBy: user.name,
@@ -713,7 +613,7 @@ const IntegrationHub: React.FC = () => {
     a.download = `integration_config_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [integrations, webhooks, user.name]);
+  }, [integrations, user.name]);
 
   const handleEmailSetupTest = useCallback(async () => {
     if (!emailSetupId) return;
@@ -1037,7 +937,6 @@ const IntegrationHub: React.FC = () => {
       if (e.key === 's' || e.key === 'S') { e.preventDefault(); setShowSyncHistory(s => !s); return; }
       if (e.key === 'c' || e.key === 'C') { e.preventDefault(); setShowSecurityPanel(s => !s); return; }
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setShowAddIntegration(s => !s); return; }
-      if (e.key === 'w' || e.key === 'W') { e.preventDefault(); setShowAddWebhook(s => !s); return; }
       if (e.key === 'l' || e.key === 'L') { e.preventDefault(); setShowSyncLogs(s => !s); return; }
       if (e.key === 'e' || e.key === 'E') { e.preventDefault(); handleExportConfig(); return; }
       if (e.key === 'p' || e.key === 'P') { e.preventDefault(); setShowPipelineAnalytics(s => !s); return; }
@@ -1049,7 +948,6 @@ const IntegrationHub: React.FC = () => {
         setShowSyncHistory(false);
         setShowSecurityPanel(false);
         setShowAddIntegration(false);
-        setShowAddWebhook(false);
         setShowPipelineAnalytics(false);
         setShowErrorDiagnostics(false);
         setShowCostOptimization(false);
@@ -1068,7 +966,7 @@ const IntegrationHub: React.FC = () => {
       {/* ══════════════════════════════════════════════════════════════ */}
       <PageHeader
         title="Integrations"
-        description={`Connected systems, APIs & webhooks · ${integrations.filter(i => i.status === 'connected').length} active`}
+        description={`Connected systems & APIs · ${integrations.filter(i => i.status === 'connected').length} active`}
         actions={
           <button
             onClick={() => setShowAddIntegration(!showAddIntegration)}
@@ -1448,7 +1346,6 @@ const IntegrationHub: React.FC = () => {
                   { time: '14:25:40', msg: 'Google Analytics: Traffic data imported', ok: true },
                   { time: '14:22:10', msg: 'Salesforce → Scaliyo: 8 leads synced', ok: true },
                   { time: '14:18:33', msg: 'Scaliyo → Mailchimp: List updated (42 contacts)', ok: true },
-                  { time: '14:15:01', msg: 'Webhook: Hot Lead Alert fired successfully', ok: true },
                 ].map((log, i) => (
                   <p key={i}>
                     <span className="text-slate-600">[{log.time}]</span>{' '}
@@ -1594,150 +1491,6 @@ const IntegrationHub: React.FC = () => {
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════ */}
-      {/* WEBHOOK CONFIGURATION                                        */}
-      {/* ══════════════════════════════════════════════════════════════ */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-slate-800 font-heading flex items-center space-x-2">
-              <ZapIcon className="w-5 h-5 text-amber-600" />
-              <span>Webhook Configuration</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {webhooks.filter(w => w.active).length} active webhooks &middot; {webhooks.length} total
-            </p>
-          </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setShowAddWebhook(!showAddWebhook)}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-sm"
-            >
-              <PlusIcon className="w-3.5 h-3.5" />
-              <span>Create Webhook</span>
-            </button>
-            <button
-              onClick={handleExportConfig}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all shadow-sm"
-            >
-              <DownloadIcon className="w-3.5 h-3.5" />
-              <span>Export Config</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Add Webhook Form */}
-        {showAddWebhook && (
-          <div className="px-6 py-4 bg-slate-50 border-b border-slate-100">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Name</label>
-                <input
-                  type="text"
-                  value={webhookForm.name}
-                  onChange={e => setWebhookForm(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="e.g., Lead Created Alert"
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Webhook URL</label>
-                <input
-                  type="url"
-                  value={webhookForm.url}
-                  onChange={e => setWebhookForm(prev => ({ ...prev, url: e.target.value }))}
-                  placeholder="https://..."
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Trigger</label>
-                <select
-                  value={webhookForm.trigger}
-                  onChange={e => setWebhookForm(prev => ({ ...prev, trigger: e.target.value }))}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                >
-                  <option>When lead is created</option>
-                  <option>When lead score changes</option>
-                  <option>When lead score &gt; 85</option>
-                  <option>When content is generated</option>
-                  <option>Daily at 18:00 UTC</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={handleAddWebhook}
-                disabled={!webhookForm.name || !webhookForm.url}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-all disabled:opacity-50"
-              >
-                Add Webhook
-              </button>
-              <button
-                onClick={() => setShowAddWebhook(false)}
-                className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-all"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Webhook List */}
-        <div className="divide-y divide-slate-50">
-          {webhooks.map(wh => (
-            <div key={wh.id} className={`px-6 py-4 transition-colors ${wh.active ? 'hover:bg-slate-50/30' : 'bg-slate-50/50 opacity-60'}`}>
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2 mb-1">
-                    <h4 className="font-bold text-sm text-slate-800">{wh.name}</h4>
-                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                      wh.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                    }`}>
-                      {wh.active ? 'Active' : 'Disabled'}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-semibold">{wh.successRate}% success</span>
-                  </div>
-                  <p className="text-xs text-slate-400 font-mono truncate mb-0.5">URL: {wh.url}</p>
-                  <p className="text-xs text-slate-500">Trigger: <span className="font-semibold">{wh.trigger}</span></p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Last fired: {wh.lastFired}</p>
-                </div>
-
-                <div className="flex items-center space-x-1.5 ml-4 shrink-0">
-                  <button className="px-2.5 py-1 bg-slate-50 text-slate-600 rounded-lg text-[10px] font-bold hover:bg-slate-100 transition-all">
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleTestWebhook(wh.id)}
-                    disabled={testingId === `wh-${wh.id}` || !wh.active}
-                    className="px-2.5 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-100 transition-all disabled:opacity-50"
-                  >
-                    {testingId === `wh-${wh.id}` ? 'Testing...' : 'Test'}
-                  </button>
-                  <button
-                    onClick={() => handleToggleWebhook(wh.id)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
-                      wh.active
-                        ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-                        : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                    }`}
-                  >
-                    {wh.active ? 'Disable' : 'Enable'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Webhook test result */}
-              {testResult?.id === `wh-${wh.id}` && (
-                <div className="mt-2 flex items-center space-x-1.5 px-2.5 py-1.5 bg-emerald-50 rounded-lg text-[11px] font-bold text-emerald-700">
-                  <CheckIcon className="w-3.5 h-3.5" />
-                  <span>Webhook test fired successfully</span>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* INTEGRATION HEALTH DASHBOARD SIDEBAR                          */}
       {/* ══════════════════════════════════════════════════════════════ */}
@@ -2622,7 +2375,6 @@ const IntegrationHub: React.FC = () => {
                 <div className="space-y-2">
                   {[
                     { key: 'N', label: 'Add integration' },
-                    { key: 'W', label: 'Add webhook' },
                     { key: 'L', label: 'Sync logs' },
                     { key: 'E', label: 'Export config' },
                   ].map((s, i) => (
