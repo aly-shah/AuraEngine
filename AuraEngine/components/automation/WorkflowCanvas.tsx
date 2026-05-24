@@ -6,7 +6,6 @@ import {
 import { NODE_TYPE_META } from './constants';
 import type { Workflow, WorkflowNode, NodeType } from './types';
 import type { IntegrationStatus } from '../../lib/integrations';
-import type { WebhookConfig } from '../../types';
 
 const getNodeIcon = (type: NodeType) => {
   switch (type) {
@@ -29,7 +28,6 @@ interface WorkflowCanvasProps {
   aiSuggestions: string[];
   onDismissSuggestions: () => void;
   integrationStatuses: IntegrationStatus[];
-  availableWebhooks: WebhookConfig[];
 }
 
 export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
@@ -44,7 +42,6 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   aiSuggestions,
   onDismissSuggestions,
   integrationStatuses,
-  availableWebhooks,
 }) => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -180,10 +177,6 @@ export const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                           const prov = node.config.crmProvider as string || 'hubspot';
                           const ok = integrationStatuses.some(i => i.provider === prov && i.status === 'connected');
                           return <span className={`shrink-0 w-2.5 h-2.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-rose-400'}`} title={ok ? `${prov} connected` : `${prov} not connected`} />;
-                        }
-                        if (at === 'fire_webhook') {
-                          const ok = !!(node.config.webhookId && availableWebhooks.some(w => w.id === node.config.webhookId));
-                          return <span className={`shrink-0 w-2.5 h-2.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-amber-400'}`} title={ok ? 'Webhook configured' : 'No webhook selected'} />;
                         }
                         return null;
                       })()}

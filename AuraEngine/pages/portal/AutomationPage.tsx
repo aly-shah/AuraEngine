@@ -289,7 +289,6 @@ export default function AutomationPage() {
                 aiSuggestions={h.aiSuggestions}
                 onDismissSuggestions={() => h.setAiSuggestions([])}
                 integrationStatuses={h.integrationStatuses}
-                availableWebhooks={h.availableWebhooks}
               />
             </div>
             <div className="lg:w-[30%]" data-guide="automation-config">
@@ -300,7 +299,6 @@ export default function AutomationPage() {
                 onUpdateDescription={h.updateNodeDescription}
                 onMoveNode={h.moveNode}
                 integrationStatuses={h.integrationStatuses}
-                availableWebhooks={h.availableWebhooks}
               />
             </div>
           </div>

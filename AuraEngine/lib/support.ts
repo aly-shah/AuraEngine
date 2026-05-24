@@ -142,10 +142,15 @@ export async function getTargetEmailConfigs(userId: string) {
 }
 
 export async function getTargetWebhooks(userId: string) {
+  // The legacy `webhooks` table was retired; outbound webhooks now live in
+  // `webhook_endpoints` (workspace-scoped). For support's purposes we treat
+  // the user's own id as the workspace id (auto-created workspaces share
+  // the user's UUID; manual workspaces won't appear here, but support can
+  // pivot to the workspace_id directly if needed).
   const { data } = await supabase
-    .from('webhooks')
-    .select('*')
-    .eq('owner_id', userId);
+    .from('webhook_endpoints')
+    .select('id, url, description, event_types, enabled, failure_count, last_attempt_at, last_success_at, created_at')
+    .eq('workspace_id', userId);
   return data ?? [];
 }
 

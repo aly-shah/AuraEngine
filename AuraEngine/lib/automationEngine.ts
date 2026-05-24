@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { sendTrackedEmail, scheduleEmailBlock } from './emailTracking';
 import { personalizeForSend } from './personalization';
 import { generatePersonalizedEmail } from './gemini';
-import { fetchIntegration, updateWebhookStats } from './integrations';
+import { fetchIntegration } from './integrations';
 import { leadDisplayName } from './queries';
 import type { Lead, EmailTemplate } from '../types';
 
@@ -592,60 +592,6 @@ async function executeAction(
       }
     }
 
-    case 'fire_webhook': {
-      const webhookId = node.config.webhookId as string;
-      if (!webhookId) {
-        return { status: 'fail', message: 'No webhook selected for this action' };
-      }
-
-      const { data: webhook } = await supabase
-        .from('webhooks')
-        .select('*')
-        .eq('id', webhookId)
-        .single();
-
-      if (!webhook) {
-        return { status: 'fail', message: `Webhook ${webhookId} not found` };
-      }
-
-      try {
-        const payload = JSON.stringify({
-          event: webhook.trigger_event,
-          lead: { id: lead.id, name: leadDisplayName(lead), email: lead.primary_email, company: lead.company, score: lead.score, status: lead.status },
-          timestamp: new Date().toISOString(),
-          workflowId: node.id,
-        });
-
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-        // HMAC-SHA256 signing if secret exists
-        if (webhook.secret) {
-          const encoder = new TextEncoder();
-          const key = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(webhook.secret),
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['sign']
-          );
-          const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
-          const hexSig = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
-          headers['X-Webhook-Signature'] = `sha256=${hexSig}`;
-        }
-
-        const res = await fetch(webhook.url, { method: 'POST', headers, body: payload });
-        const success = res.ok;
-        await updateWebhookStats(webhookId, success);
-
-        if (success) {
-          return { status: 'pass', message: `Webhook "${webhook.name}" fired successfully` };
-        }
-        return { status: 'fail', message: `Webhook "${webhook.name}" returned ${res.status}` };
-      } catch (err) {
-        await updateWebhookStats(webhookId, false).catch(() => {});
-        return { status: 'fail', message: `Webhook fire failed: ${(err as Error).message}` };
-      }
-    }
 
     default:
       return { status: 'pass', message: `Action "${node.title}" executed (type: ${actionType})` };
@@ -659,7 +605,6 @@ function inferActionType(node: WorkflowNode): string {
   if (title.includes('tag')) return 'add_tag';
   if (title.includes('slack')) return 'notify_slack';
   if (title.includes('crm') || title.includes('hubspot') || title.includes('salesforce')) return 'sync_crm';
-  if (title.includes('webhook')) return 'fire_webhook';
   if (title.includes('alert') || title.includes('notify')) return 'create_alert';
   if (title.includes('assign')) return 'assign_user';
   return 'generic';

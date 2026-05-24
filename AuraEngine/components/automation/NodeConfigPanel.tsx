@@ -6,7 +6,6 @@ import {
 import { NODE_TYPE_META, TRIGGER_OPTIONS, ACTION_OPTIONS, EMAIL_TEMPLATES, MODEL_OPTIONS, OPERATOR_OPTIONS } from './constants';
 import type { WorkflowNode, NodeType } from './types';
 import type { IntegrationStatus } from '../../lib/integrations';
-import type { WebhookConfig } from '../../types';
 
 const getNodeIcon = (type: NodeType) => {
   switch (type) {
@@ -24,7 +23,6 @@ interface NodeConfigPanelProps {
   onUpdateDescription: (nodeId: string, description: string) => void;
   onMoveNode: (nodeId: string, direction: 'up' | 'down') => void;
   integrationStatuses: IntegrationStatus[];
-  availableWebhooks: WebhookConfig[];
 }
 
 export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
@@ -34,7 +32,6 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
   onUpdateDescription,
   onMoveNode,
   integrationStatuses,
-  availableWebhooks,
 }) => {
   if (!selectedNode) {
     return (
@@ -148,10 +145,6 @@ export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({
                 <CrmConfig node={selectedNode} onUpdateConfig={onUpdateConfig} integrationStatuses={integrationStatuses} />
               )}
 
-              {/* Webhook Config */}
-              {(selectedNode.config.actionType as string) === 'fire_webhook' && (
-                <WebhookActionConfig node={selectedNode} onUpdateConfig={onUpdateConfig} availableWebhooks={availableWebhooks} />
-              )}
             </>
           )}
 
@@ -371,33 +364,3 @@ const CrmConfig: React.FC<{ node: WorkflowNode; onUpdateConfig: (id: string, key
   );
 };
 
-const WebhookActionConfig: React.FC<{ node: WorkflowNode; onUpdateConfig: (id: string, key: string, value: string | number | boolean) => void; availableWebhooks: WebhookConfig[] }> = ({ node, onUpdateConfig, availableWebhooks }) => (
-  <>
-    <div>
-      <label className="block text-xs font-bold text-slate-600 mb-1">Webhook</label>
-      <select value={node.config.webhookId as string || ''} onChange={e => onUpdateConfig(node.id, 'webhookId', e.target.value)} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-        <option value="">Select a webhook...</option>
-        {availableWebhooks.map(wh => (
-          <option key={wh.id} value={wh.id}>{wh.name} ({wh.trigger_event})</option>
-        ))}
-      </select>
-      {availableWebhooks.length === 0 && (
-        <p className="text-[10px] text-amber-600 mt-1">No webhooks configured. Create one in Integration Hub.</p>
-      )}
-    </div>
-    {node.config.webhookId && (() => {
-      const wh = availableWebhooks.find(w => w.id === node.config.webhookId);
-      return wh ? (
-        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-          <p className="text-xs font-bold text-slate-700">{wh.name}</p>
-          <p className="text-[10px] text-slate-400 font-mono truncate">{wh.url}</p>
-          <div className="flex items-center space-x-2 text-[10px]">
-            <span className={`font-bold ${wh.is_active ? 'text-emerald-600' : 'text-slate-400'}`}>{wh.is_active ? 'Active' : 'Inactive'}</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-slate-500">{wh.fire_count} fires, {wh.success_rate.toFixed(0)}% success</span>
-          </div>
-        </div>
-      ) : null;
-    })()}
-  </>
-);

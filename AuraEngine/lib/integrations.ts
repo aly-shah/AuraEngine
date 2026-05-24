@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 import { getRequestId } from './requestId';
-import type { Integration, WebhookConfig } from '../types';
+import type { Integration } from '../types';
 
 // ─── Integration CRUD ───
 
@@ -85,103 +85,43 @@ export async function disconnectIntegration(provider: string): Promise<void> {
   if (error) throw new Error(`Failed to disconnect integration: ${error.message}`);
 }
 
-// ─── Webhook CRUD ───
+// ─── Legacy webhook shims ───
+//
+// The `webhooks` table was retired; outbound webhooks now live in
+// `webhook_endpoints` (workspace-scoped, event-driven). These shims keep
+// IntegrationHub's legacy webhook section from crashing while it's
+// migrated to the new flow at /portal/webhooks. They no-op silently.
+// Remove once IntegrationHub's webhook UI is gone.
 
-export async function fetchWebhooks(): Promise<WebhookConfig[]> {
-  const { data, error } = await supabase
-    .from('webhooks')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Failed to fetch webhooks:', error.message);
-    return [];
-  }
-
-  return (data || []).map(row => ({
-    id: row.id,
-    name: row.name,
-    url: row.url,
-    trigger_event: row.trigger_event,
-    is_active: row.is_active,
-    secret: row.secret || undefined,
-    last_fired: row.last_fired || undefined,
-    success_rate: row.success_rate ?? 100,
-    fire_count: row.fire_count ?? 0,
-    fail_count: row.fail_count ?? 0,
-  }));
+export interface LegacyWebhook {
+  id: string;
+  name: string;
+  url: string;
+  trigger_event: string;
+  is_active: boolean;
+  secret?: string;
+  last_fired?: string;
+  success_rate: number;
+  fire_count: number;
+  fail_count: number;
 }
 
-export async function upsertWebhook(webhook: Partial<WebhookConfig> & { name: string; url: string; trigger_event: string }): Promise<WebhookConfig> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const row: Record<string, unknown> = {
-    owner_id: user.id,
-    name: webhook.name,
-    url: webhook.url,
-    trigger_event: webhook.trigger_event,
-    is_active: webhook.is_active ?? true,
-    secret: webhook.secret || null,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (webhook.id) {
-    row.id = webhook.id;
-  }
-
-  const { data, error } = await supabase
-    .from('webhooks')
-    .upsert(row, { onConflict: 'id' })
-    .select()
-    .single();
-
-  if (error) throw new Error(`Failed to save webhook: ${error.message}`);
-
-  return {
-    id: data.id,
-    name: data.name,
-    url: data.url,
-    trigger_event: data.trigger_event,
-    is_active: data.is_active,
-    secret: data.secret || undefined,
-    last_fired: data.last_fired || undefined,
-    success_rate: data.success_rate ?? 100,
-    fire_count: data.fire_count ?? 0,
-    fail_count: data.fail_count ?? 0,
-  };
+export async function fetchWebhooks(): Promise<LegacyWebhook[]> {
+  return [];
 }
 
-export async function deleteWebhook(id: string): Promise<void> {
-  const { error } = await supabase
-    .from('webhooks')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw new Error(`Failed to delete webhook: ${error.message}`);
+export async function upsertWebhook(
+  _webhook: Partial<LegacyWebhook> & { name: string; url: string; trigger_event: string },
+): Promise<LegacyWebhook> {
+  throw new Error('Outbound webhooks have moved — manage them at /portal/webhooks.');
 }
 
-export async function updateWebhookStats(id: string, success: boolean): Promise<void> {
-  const { data: current } = await supabase
-    .from('webhooks')
-    .select('fire_count, fail_count')
-    .eq('id', id)
-    .single();
+export async function deleteWebhook(_id: string): Promise<void> {
+  // no-op
+}
 
-  const fireCount = (current?.fire_count ?? 0) + 1;
-  const failCount = (current?.fail_count ?? 0) + (success ? 0 : 1);
-  const successRate = fireCount > 0 ? ((fireCount - failCount) / fireCount) * 100 : 100;
-
-  await supabase
-    .from('webhooks')
-    .update({
-      fire_count: fireCount,
-      fail_count: failCount,
-      success_rate: parseFloat(successRate.toFixed(1)),
-      last_fired: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
+export async function updateWebhookStats(_id: string, _success: boolean): Promise<void> {
+  // no-op
 }
 
 // ─── Validation (calls edge function) ───
@@ -221,16 +161,13 @@ export interface IntegrationStatus {
 
 export function useIntegrations() {
   const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
-  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Load non-email integrations from `integrations` table
       const nonEmail = await fetchIntegrations();
 
-      // Load email provider configs from `email_provider_configs` table
       const { data: emailData } = await supabase
         .from('email_provider_configs')
         .select('provider, is_active, updated_at');
@@ -250,10 +187,6 @@ export function useIntegrations() {
       }));
 
       setIntegrations([...nonEmailStatuses, ...emailStatuses]);
-
-      // Load webhooks
-      const wh = await fetchWebhooks();
-      setWebhooks(wh);
     } catch (err) {
       console.error('useIntegrations load error:', err);
     } finally {
@@ -265,5 +198,5 @@ export function useIntegrations() {
     load();
   }, [load]);
 
-  return { integrations, webhooks, loading, refetch: load };
+  return { integrations, loading, refetch: load };
 }

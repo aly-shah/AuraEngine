@@ -431,7 +431,7 @@ export interface AlertRule {
 
 // Module 5: Workflow Automation
 export type TriggerType = 'score_change' | 'status_change' | 'lead_created' | 'time_elapsed' | 'tag_added' | 'content_generated';
-export type ActionType = 'send_email' | 'update_status' | 'add_tag' | 'assign_user' | 'generate_content' | 'create_alert' | 'move_to_segment' | 'notify_slack' | 'sync_crm' | 'fire_webhook';
+export type ActionType = 'send_email' | 'update_status' | 'add_tag' | 'assign_user' | 'generate_content' | 'create_alert' | 'move_to_segment' | 'notify_slack' | 'sync_crm';
 
 export interface AutomationTrigger {
   type: TriggerType;
@@ -696,19 +696,6 @@ export interface Integration {
   credentials: Record<string, string>;
   metadata: Record<string, unknown>;
   updated_at: string;
-}
-
-export interface WebhookConfig {
-  id: string;
-  name: string;
-  url: string;
-  trigger_event: string;
-  is_active: boolean;
-  secret?: string;
-  last_fired?: string;
-  success_rate: number;
-  fire_count: number;
-  fail_count: number;
 }
 
 // ── Sender Accounts ─────────────────────────────────────────────────────────

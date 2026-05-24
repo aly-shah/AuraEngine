@@ -56,7 +56,6 @@ export const ACTION_OPTIONS: { type: ActionType; label: string }[] = [
   { type: 'move_to_segment', label: 'Move to Segment' },
   { type: 'notify_slack', label: 'Notify Slack' },
   { type: 'sync_crm', label: 'Sync to CRM' },
-  { type: 'fire_webhook', label: 'Fire Webhook' },
 ];
 
 // ─── Model, Frequency & Operator Options ───

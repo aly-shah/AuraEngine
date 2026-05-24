@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Lead, TriggerType } from '../types';
-import type { WebhookConfig } from '../types';
 import {
   saveWorkflow as saveWorkflowToDb,
   loadWorkflows as loadWorkflowsFromDb,
@@ -20,7 +19,7 @@ import {
   type CampaignRecipient,
   type BatchEmailSummary,
 } from '../lib/emailTracking';
-import { useIntegrations, fetchWebhooks as fetchWebhooksFromDb } from '../lib/integrations';
+import { useIntegrations } from '../lib/integrations';
 import type { IntegrationStatus } from '../lib/integrations';
 import {
   DEFAULT_WORKFLOW,
@@ -48,7 +47,6 @@ import type {
 export function useAutomationWorkflow(userId: string | undefined) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const { integrations: integrationStatuses } = useIntegrations();
-  const [availableWebhooks, setAvailableWebhooks] = useState<WebhookConfig[]>([]);
 
   // ─── Wizard State ───
   const [wizardActive, setWizardActive] = useState(false);
@@ -154,10 +152,6 @@ export function useAutomationWorkflow(userId: string | undefined) {
     };
     fetchLeads();
   }, [userId]);
-
-  useEffect(() => {
-    fetchWebhooksFromDb().then(setAvailableWebhooks).catch(e => console.warn('[Automation] webhook load failed:', e));
-  }, []);
 
   useEffect(() => {
     if (leads.length === 0) return;
@@ -838,7 +832,6 @@ export function useAutomationWorkflow(userId: string | undefined) {
     selectedNode,
     selectedNodeId,
     integrationStatuses,
-    availableWebhooks,
     emailSummaryMap,
 
     // Computed
