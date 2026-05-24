@@ -20,12 +20,12 @@ import { useOutletContext, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Rocket, Users, Upload, Clipboard, Sparkles, Loader2, Mail, Send,
-  RefreshCw, Check, Info, AlertCircle, ArrowRight, Zap,
+  RefreshCw, Check, Info, AlertCircle, ArrowRight, Zap, Eye, X,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { resolveWorkspaceForUser, createMyWorkspace } from '../../lib/memory';
 import {
-  generateEmailSequence, parseEmailSequenceResponse,
+  generateEmailSequence, parseEmailSequenceResponse, generatePersonalizedEmail,
 } from '../../lib/gemini';
 import { ToneType, type User, type EmailSequenceConfig, type Lead } from '../../types';
 
@@ -211,6 +211,85 @@ const QuickLaunchPage: React.FC = () => {
   const [steps, setSteps] = useState<SequenceStep[]>(SAMPLE_STEPS);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+
+  // ─── Per-lead email preview ──────────────────────────────────────
+  // Click a lead row → modal calls generatePersonalizedEmail (same engine
+  // process-email-writing-queue uses at send time) and shows the actual
+  // AI-rewritten email for that lead × step. Results are cached per
+  // (lead, step) so re-opening or switching steps doesn't re-burn tokens.
+  const [previewLead, setPreviewLead] = useState<Lead | null>(null);
+  const [previewStepIdx, setPreviewStepIdx] = useState(0);
+  const [previewCache, setPreviewCache] = useState<Map<string, { subject: string; htmlBody: string }>>(new Map());
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const previewKey = previewLead ? `${previewLead.id}-${previewStepIdx}` : '';
+  const previewResult = previewKey ? previewCache.get(previewKey) : undefined;
+
+  const runPreview = useCallback(async (lead: Lead, stepIdx: number, force = false) => {
+    const key = `${lead.id}-${stepIdx}`;
+    if (!force && previewCache.has(key)) return;
+    const step = steps[stepIdx];
+    if (!step) {
+      setPreviewError('Generate the sequence in Step 3 first, then come back to preview.');
+      return;
+    }
+    setPreviewLoading(true); setPreviewError(null);
+    try {
+      const firstName = lead.first_name || lead.primary_email?.split('@')[0] || 'there';
+      const company = lead.company || 'your company';
+      const resolveTags = (s: string) =>
+        s.replace(/\{\{\s*first_name\s*\}\}/gi, firstName)
+         .replace(/\{\{\s*company\s*\}\}/gi, company)
+         .replace(/\{\{\s*industry\s*\}\}/gi, lead.industry || '')
+         .replace(/\{\{\s*job_title\s*\}\}/gi, lead.title || '');
+      const result = await generatePersonalizedEmail({
+        subjectTemplate: resolveTags(step.subject),
+        bodyTemplate:    resolveTags(step.body),
+        lead,
+        businessProfile: user.businessProfile ?? undefined,
+        tone,
+      }, user.id);
+      setPreviewCache((prev) => {
+        const next = new Map(prev);
+        next.set(key, { subject: result.subject, htmlBody: result.htmlBody });
+        return next;
+      });
+    } catch (e) {
+      setPreviewError((e as Error).message ?? 'Preview generation failed');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [previewCache, steps, tone, user]);
+
+  const openPreview = useCallback((lead: Lead) => {
+    setPreviewLead(lead);
+    setPreviewStepIdx(0);
+    setPreviewError(null);
+    void runPreview(lead, 0);
+  }, [runPreview]);
+
+  const closePreview = useCallback(() => {
+    setPreviewLead(null);
+    setPreviewError(null);
+  }, []);
+
+  const switchPreviewStep = useCallback((idx: number) => {
+    setPreviewStepIdx(idx);
+    setPreviewError(null);
+    if (previewLead) void runPreview(previewLead, idx);
+  }, [previewLead, runPreview]);
+
+  const regeneratePreview = useCallback(() => {
+    if (previewLead) {
+      setPreviewCache((prev) => {
+        const next = new Map(prev);
+        next.delete(`${previewLead.id}-${previewStepIdx}`);
+        return next;
+      });
+      void runPreview(previewLead, previewStepIdx, true);
+    }
+  }, [previewLead, previewStepIdx, runPreview]);
 
   // ─── Launch state ──────────────────────────────────────────────────
   const [launching, setLaunching] = useState(false);
@@ -489,20 +568,31 @@ const QuickLaunchPage: React.FC = () => {
                 filteredEmailable.map((l) => {
                   const checked = selectedIds.has(l.id);
                   return (
-                    <label key={l.id} className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded-md border cursor-pointer transition-colors ${checked ? 'bg-indigo-50/60 border-indigo-200' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleLead(l.id)}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="font-semibold text-slate-700 truncate min-w-0 flex-shrink-0">{l.first_name} {l.last_name}</span>
-                      <span className="text-slate-400 truncate flex-1 min-w-0">{l.primary_email}</span>
-                      {l.company && <span className="text-slate-400 truncate hidden md:inline max-w-[120px]">{l.company}</span>}
-                      {typeof l.score === 'number' && l.score > 0 && (
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${l.score >= 70 ? 'bg-emerald-50 text-emerald-700' : l.score >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{l.score}</span>
-                      )}
-                    </label>
+                    <div key={l.id} className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded-md border transition-colors ${checked ? 'bg-indigo-50/60 border-indigo-200' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleLead(l.id)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="font-semibold text-slate-700 truncate flex-shrink-0">{l.first_name} {l.last_name}</span>
+                        <span className="text-slate-400 truncate flex-1 min-w-0">{l.primary_email}</span>
+                        {l.company && <span className="text-slate-400 truncate hidden md:inline max-w-[120px]">{l.company}</span>}
+                        {typeof l.score === 'number' && l.score > 0 && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${l.score >= 70 ? 'bg-emerald-50 text-emerald-700' : l.score >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>{l.score}</span>
+                        )}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openPreview(l); }}
+                        disabled={steps.length === 0}
+                        title={steps.length === 0 ? 'Generate the sequence first (Step 3) to preview' : 'Preview the AI-personalized email for this lead'}
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <Eye size={11} /> Preview
+                      </button>
+                    </div>
                   );
                 })
               )}
@@ -672,6 +762,93 @@ const QuickLaunchPage: React.FC = () => {
         planName={user.plan ?? 'Free'}
         onImportComplete={() => { setMode('existing'); refetchExisting(); setImportOpen(false); }}
       />
+
+      {/* ── Per-lead email preview drawer ────────────────────────── */}
+      {previewLead && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={closePreview} />
+          <div className="relative w-full max-w-xl bg-white shadow-2xl flex flex-col animate-in slide-in-from-right">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">AI-personalized preview</p>
+                <h3 className="font-bold text-slate-900 truncate">{previewLead.first_name} {previewLead.last_name}</h3>
+                <p className="text-[11px] text-slate-500 truncate">{previewLead.primary_email}{previewLead.company ? ` · ${previewLead.company}` : ''}{previewLead.title ? ` · ${previewLead.title}` : ''}</p>
+              </div>
+              <button onClick={closePreview} className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Step tabs */}
+            {steps.length > 1 && (
+              <div className="px-5 pt-3 flex items-center gap-1.5 border-b border-slate-100">
+                {steps.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => switchPreviewStep(i)}
+                    className={`px-2.5 py-1.5 text-[11px] font-bold rounded-t-lg border-b-2 transition-colors ${i === previewStepIdx ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                  >
+                    Step {i + 1}
+                    <span className="ml-1.5 text-[9px] font-normal text-slate-400">
+                      {s.delayDays === 0 ? 'now' : `+${s.delayDays}d`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              {previewLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500 py-8 justify-center">
+                  <Loader2 size={16} className="animate-spin" /> Gemini is writing this email for {previewLead.first_name}…
+                </div>
+              ) : previewError ? (
+                <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg p-3 text-xs">
+                  <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-semibold">{previewError}</p>
+                    <button onClick={regeneratePreview} className="mt-1 text-rose-800 underline font-bold">Retry</button>
+                  </div>
+                </div>
+              ) : previewResult ? (
+                <>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Subject</p>
+                    <p className="text-sm font-bold text-slate-900">{previewResult.subject}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Body</p>
+                    <div
+                      className="prose prose-sm max-w-none text-slate-800 [&_p]:my-2 [&_a]:text-indigo-600"
+                      dangerouslySetInnerHTML={{ __html: previewResult.htmlBody }}
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-500 border-t border-slate-100 pt-3">
+                    <Info size={11} className="inline mr-1 text-slate-400" />
+                    This is the actual AI-personalized version that goes out at send time — the same path the writing queue runs for every lead. Each lead gets their own pass, so {previewLead.first_name}'s email reads differently than {previewLead.first_name === 'Maya' ? 'Daniel' : 'the others'}'s.
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50">
+              <span className="text-[11px] text-slate-400">Lead ID: <code className="font-mono text-slate-600">{previewLead.id.slice(0, 8)}…</code></span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={regeneratePreview}
+                  disabled={previewLoading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <RefreshCw size={11} /> Regenerate
+                </button>
+                <button onClick={closePreview} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-slate-800">
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
