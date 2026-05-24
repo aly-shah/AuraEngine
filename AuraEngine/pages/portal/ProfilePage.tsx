@@ -11,7 +11,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import StageColorSettings from '../../components/leads/StageColorSettings';
 import { consumeCredits } from '../../lib/credits';
-import { analyzeBusinessFromWeb, generateFollowUpQuestions } from '../../lib/gemini';
+import { analyzeBusinessFromWeb, generateFollowUpQuestions, generateProfileField, type ProfileGenField } from '../../lib/gemini';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { AdvancedOnly, useUIMode } from '../../components/ui-mode';
 import { BRAND } from '../../lib/brand';
@@ -57,6 +57,50 @@ const NOTIF_STORAGE_KEY = 'scaliyo_notification_prefs';
 const APIKEYS_STORAGE_KEY = 'scaliyo_api_keys';
 
 type SettingsTab = 'profile' | 'business_profile' | 'notifications' | 'preferences' | 'api_keys' | 'security' | 'pipeline_colors';
+
+/** Inline "Write with AI" chip — drops next to a business-profile field label.
+ *  Spends 1 credit, calls generateProfileField, and feeds the result back via
+ *  the onResult callback so the parent can patch the form state. */
+const WriteWithAIChip: React.FC<{
+  field: ProfileGenField;
+  getProfile: () => BusinessProfile;
+  userId: string;
+  onResult: (value: string) => void;
+}> = ({ field, getProfile, userId, onResult }) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const handleClick = async () => {
+    setLoading(true); setError(null);
+    try {
+      const creditResult = await consumeCredits(supabase, 'profile_field_generation');
+      if (!creditResult.success) throw new Error(creditResult.message || 'Insufficient credits.');
+      const result = await generateProfileField(field, getProfile(), userId);
+      onResult(result.value);
+    } catch (err) {
+      setError((err as Error).message ?? 'Generation failed');
+      setTimeout(() => setError(null), 4500);
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={loading}
+        title="Generate this field with AI · 1 credit"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {loading
+          ? <span className="w-2.5 h-2.5 border border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          : <span className="text-indigo-600">✨</span>}
+        {loading ? 'Writing…' : 'Write with AI · 1 cr'}
+      </button>
+      {error && <span className="text-[10px] font-bold text-rose-600 truncate max-w-[260px]" title={error}>{error}</span>}
+    </div>
+  );
+};
 
 const ProfilePage: React.FC = () => {
   const { user, refreshProfile } = useOutletContext<{ user: User; refreshProfile: () => Promise<void> }>();
@@ -2070,14 +2114,20 @@ const ProfilePage: React.FC = () => {
                   </div>
                   <div className="space-y-6">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">About Your Business</label>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">About Your Business</label>
+                        <WriteWithAIChip field="businessDescription" getProfile={() => businessProfile} userId={user.id} onResult={(v) => setBusinessProfile(p => ({ ...p, businessDescription: v }))} />
+                      </div>
                       <textarea value={businessProfile.businessDescription || ''} onChange={e => setBusinessProfile(p => ({ ...p, businessDescription: e.target.value }))}
                         placeholder="e.g. I run a digital marketing agency helping small restaurants and cafes grow online. We offer monthly packages including content creation, posting schedules, and analytics. Our clients are local business owners who want more customers but don't have time to manage social media themselves."
                         rows={4}
                         className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-bold text-slate-800 resize-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">What You Sell (Summary)</label>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">What You Sell (Summary)</label>
+                        <WriteWithAIChip field="productsServices" getProfile={() => businessProfile} userId={user.id} onResult={(v) => setBusinessProfile(p => ({ ...p, productsServices: v }))} />
+                      </div>
                       <textarea value={businessProfile.productsServices || ''} onChange={e => setBusinessProfile(p => ({ ...p, productsServices: e.target.value }))}
                         placeholder="Describe your main products or services..."
                         rows={3}
@@ -2104,7 +2154,10 @@ const ProfilePage: React.FC = () => {
                         className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors">+ Add Service</button>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Value Proposition</label>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Value Proposition</label>
+                        <WriteWithAIChip field="valueProp" getProfile={() => businessProfile} userId={user.id} onResult={(v) => setBusinessProfile(p => ({ ...p, valueProp: v }))} />
+                      </div>
                       <textarea value={businessProfile.valueProp || ''} onChange={e => setBusinessProfile(p => ({ ...p, valueProp: e.target.value }))}
                         placeholder="What makes your offering unique? Why should prospects choose you?"
                         rows={3}
@@ -2120,7 +2173,10 @@ const ProfilePage: React.FC = () => {
                     <p className="text-sm text-slate-500 mt-1">Who is your ideal customer?</p>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Ideal Customer Profile</label>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Ideal Customer Profile</label>
+                      <WriteWithAIChip field="targetAudience" getProfile={() => businessProfile} userId={user.id} onResult={(v) => setBusinessProfile(p => ({ ...p, targetAudience: v }))} />
+                    </div>
                     <textarea value={businessProfile.targetAudience || ''} onChange={e => setBusinessProfile(p => ({ ...p, targetAudience: e.target.value }))}
                       placeholder="Describe your ideal customer — role, company size, industry, pain points..."
                       rows={3}
@@ -2136,13 +2192,19 @@ const ProfilePage: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Pricing Model (Summary)</label>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Pricing Model (Summary)</label>
+                        <WriteWithAIChip field="pricingModel" getProfile={() => businessProfile} userId={user.id} onResult={(v) => setBusinessProfile(p => ({ ...p, pricingModel: v }))} />
+                      </div>
                       <input type="text" value={businessProfile.pricingModel || ''} onChange={e => setBusinessProfile(p => ({ ...p, pricingModel: e.target.value }))}
                         placeholder="e.g. Subscription, Per-seat, Usage-based"
                         className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-bold text-slate-800" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Sales Approach</label>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Sales Approach</label>
+                        <WriteWithAIChip field="salesApproach" getProfile={() => businessProfile} userId={user.id} onResult={(v) => setBusinessProfile(p => ({ ...p, salesApproach: v }))} />
+                      </div>
                       <input type="text" value={businessProfile.salesApproach || ''} onChange={e => setBusinessProfile(p => ({ ...p, salesApproach: e.target.value }))}
                         placeholder="e.g. Product-led, Enterprise sales, Freemium"
                         className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all font-bold text-slate-800" />

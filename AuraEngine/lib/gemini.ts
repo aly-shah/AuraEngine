@@ -1204,6 +1204,103 @@ Rules:
   };
 };
 
+// ─── Per-field "Write with AI" ─────────────────────────────────────────
+//
+// Generates the text for ONE business-profile field using everything else
+// in the profile as context. Used by the inline "Write with AI" chips on
+// the manual entry form.
+
+export type ProfileGenField =
+  | 'businessDescription'
+  | 'productsServices'
+  | 'valueProp'
+  | 'targetAudience'
+  | 'pricingModel'
+  | 'salesApproach'
+  | 'competitiveAdvantage'
+  | 'companyStory'
+  | 'teamHighlights'
+  | 'contentTone';
+
+const PROFILE_FIELD_BRIEFS: Record<ProfileGenField, { label: string; constraint: string }> = {
+  businessDescription:  { label: 'About Your Business',     constraint: 'Write 2-3 plain-language sentences explaining what this business does and who it serves. No marketing jargon.' },
+  productsServices:     { label: 'What You Sell (Summary)', constraint: 'Write a single short paragraph (40-80 words) summarising the main products or services. Concrete, specific.' },
+  valueProp:            { label: 'Value Proposition',       constraint: 'Write a 1-2 sentence value proposition that names the outcome the customer gets, not generic claims. Avoid the words "leading", "innovative", "world-class".' },
+  targetAudience:       { label: 'Ideal Customer Profile',  constraint: 'Describe the ideal customer in 2-3 sentences: role/title, company size or stage, the specific problem they have that this business solves.' },
+  pricingModel:         { label: 'Pricing Model',           constraint: 'One sentence describing the pricing structure (e.g., "tiered SaaS starting at $X/mo per seat" or "project-based, $5k–$25k engagements").' },
+  salesApproach:        { label: 'Sales Approach',          constraint: 'One sentence describing the sales motion (e.g., "outbound founder-led" or "inbound demo → 30-day pilot → annual contract").' },
+  competitiveAdvantage: { label: 'Competitive Advantage',   constraint: 'One sentence that names a concrete edge over alternatives — not "we care more". Cite a specific capability, dataset, integration, or speed advantage if possible.' },
+  companyStory:         { label: 'Company Story',           constraint: 'A 3-4 sentence origin / founding story. Why this exists. Avoid being self-congratulatory.' },
+  teamHighlights:       { label: 'Team Highlights',         constraint: 'A 1-2 sentence team intro (size + 1-2 notable credentials or experience points). No fluff.' },
+  contentTone:          { label: 'Brand Tone',              constraint: 'One short descriptor of the brand voice (e.g., "direct, technical, no-nonsense" or "warm, conversational, expert").' },
+};
+
+function profileContextLines(profile: BusinessProfile): string {
+  const parts: string[] = [];
+  if (profile.companyName)           parts.push(`Company: ${profile.companyName}`);
+  if (profile.industry)              parts.push(`Industry: ${profile.industry}`);
+  if (profile.companyWebsite)        parts.push(`Website: ${profile.companyWebsite}`);
+  if (profile.businessDescription)   parts.push(`About: ${profile.businessDescription}`);
+  if (profile.productsServices)      parts.push(`Products/Services: ${profile.productsServices}`);
+  if (profile.valueProp)             parts.push(`Value Prop: ${profile.valueProp}`);
+  if (profile.targetAudience)        parts.push(`Ideal Customer: ${profile.targetAudience}`);
+  if (profile.pricingModel)          parts.push(`Pricing: ${profile.pricingModel}`);
+  if (profile.salesApproach)         parts.push(`Sales Approach: ${profile.salesApproach}`);
+  if (profile.competitiveAdvantage)  parts.push(`Competitive Advantage: ${profile.competitiveAdvantage}`);
+  if (profile.contentTone)           parts.push(`Brand Tone: ${profile.contentTone}`);
+  if (profile.services?.length)      parts.push(`Services List: ${profile.services.map(s => s.name).filter(Boolean).join(', ')}`);
+  if (profile.uniqueSellingPoints?.length) parts.push(`USPs: ${profile.uniqueSellingPoints.join(', ')}`);
+  if (profile.keyClients)            parts.push(`Key Clients: ${profile.keyClients}`);
+  if (profile.teamSize)              parts.push(`Team Size: ${profile.teamSize}`);
+  if (profile.foundedYear)           parts.push(`Founded: ${profile.foundedYear}`);
+  return parts.length ? parts.join('\n') : '(no other profile fields filled yet)';
+}
+
+export async function generateProfileField(
+  field: ProfileGenField,
+  profile: BusinessProfile,
+  userId?: string,
+): Promise<{ value: string; tokensUsed: number }> {
+  const brief = PROFILE_FIELD_BRIEFS[field];
+  if (!brief) throw new Error(`Unknown profile field: ${field}`);
+
+  const ai = getGeminiClient();
+  const systemInstruction = `You write concise, specific business profile copy. You produce ONLY the text the user asked for — no preamble, no markdown, no quotes around the output, no commentary. If the context is too thin to write well, you still produce a credible draft the user can edit, but you never write "[insert details here]" or similar placeholders.`;
+
+  const prompt = `Write the "${brief.label}" field for this business profile.
+
+CONSTRAINT: ${brief.constraint}
+
+PROFILE CONTEXT (other fields the user has filled in — use these as ground truth):
+${profileContextLines(profile)}
+
+Output: just the field text. Plain text. No labels, no quotes.`;
+
+  const TIMEOUT_PER_CALL_MS = 20_000;
+  const response = await Promise.race([
+    ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+        topP: 0.9,
+      },
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Write with AI timed out after 20s')), TIMEOUT_PER_CALL_MS),
+    ),
+  ]);
+
+  const text = (response.text || '').trim().replace(/^["']|["']$/g, '');
+  if (!text) throw new Error('AI returned no content for this field.');
+
+  return {
+    value: text,
+    tokensUsed: response.usageMetadata?.totalTokenCount || 0,
+  };
+}
+
 export const generateFollowUpQuestions = async (
   currentProfile: BusinessProfile,
   previousQA?: { field: string; question: string; answer: string }[],

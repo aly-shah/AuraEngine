@@ -25,6 +25,7 @@ export const AI_CREDIT_COSTS = {
   lead_scoring: 1,
   business_analysis: 5,
   clear_business_profile: 2,
+  profile_field_generation: 1,
 
   // Strategy & automation
   pipeline_strategy: 3,
