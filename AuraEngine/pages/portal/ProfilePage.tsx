@@ -374,15 +374,32 @@ const ProfilePage: React.FC = () => {
       const result = await analyzeBusinessFromWeb(fullUrl, socials);
       if (!result.analysis) throw new Error('Could not analyze the website. Edit your fields manually or try a different URL.');
 
-      // Merge into whatever the user has now (they may have edited during the wait).
+      // Merge into whatever the user has now. Two rules:
+      //   - Empty fields:  fill with anything the AI returned (any confidence).
+      //   - Filled fields: ONLY overwrite when the AI confidence is high
+      //                    (>=70). Low-confidence AI guesses are ignored so
+      //                    re-analyze never silently clobbers curated copy.
+      // Previously every filled field was preserved unconditionally, which
+      // made re-analyze look like a no-op (user saw the same old profile).
+      const HIGH_CONFIDENCE = 70;
       const current = businessProfileRef.current;
       const populated: BusinessProfile = { ...current };
       let fieldsAdded = 0;
+      let fieldsUpdated = 0;
       const isEmpty = (v: unknown) => v == null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && v.length === 0);
-      const setIfEmpty = <K extends keyof BusinessProfile>(field: K, value: BusinessProfile[K] | undefined) => {
-        if (value != null && value !== '' && isEmpty((populated as any)[field])) {
+      const mergeField = <K extends keyof BusinessProfile>(
+        field: K,
+        value: BusinessProfile[K] | undefined,
+        confidence: number,
+      ) => {
+        if (value == null || value === '') return;
+        const currentlyEmpty = isEmpty((populated as any)[field]);
+        if (currentlyEmpty) {
           (populated as any)[field] = value;
           fieldsAdded++;
+        } else if (confidence >= HIGH_CONFIDENCE && (populated as any)[field] !== value) {
+          (populated as any)[field] = value;
+          fieldsUpdated++;
         }
       };
 
@@ -393,26 +410,49 @@ const ProfilePage: React.FC = () => {
       ] as const;
       stringFields.forEach(f => {
         const deep = (result.analysis as any)[f];
-        if (deep?.value) setIfEmpty(f as any, deep.value);
+        if (deep?.value) mergeField(f as any, deep.value, deep.confidence ?? 0);
       });
 
-      if (result.analysis.services?.value?.length && isEmpty(populated.services)) {
-        populated.services = result.analysis.services.value;
-        setServicesList(result.analysis.services.value);
-        fieldsAdded++;
+      const servicesDeep = (result.analysis as any).services;
+      if (servicesDeep?.value?.length) {
+        const conf = servicesDeep.confidence ?? 0;
+        if (isEmpty(populated.services)) {
+          populated.services = servicesDeep.value;
+          setServicesList(servicesDeep.value);
+          fieldsAdded++;
+        } else if (conf >= HIGH_CONFIDENCE) {
+          populated.services = servicesDeep.value;
+          setServicesList(servicesDeep.value);
+          fieldsUpdated++;
+        }
       }
-      if (result.analysis.pricingTiers?.value?.length && isEmpty(populated.pricingTiers)) {
-        populated.pricingTiers = result.analysis.pricingTiers.value;
-        setPricingTiers(result.analysis.pricingTiers.value);
-        fieldsAdded++;
+      const pricingDeep = (result.analysis as any).pricingTiers;
+      if (pricingDeep?.value?.length) {
+        const conf = pricingDeep.confidence ?? 0;
+        if (isEmpty(populated.pricingTiers)) {
+          populated.pricingTiers = pricingDeep.value;
+          setPricingTiers(pricingDeep.value);
+          fieldsAdded++;
+        } else if (conf >= HIGH_CONFIDENCE) {
+          populated.pricingTiers = pricingDeep.value;
+          setPricingTiers(pricingDeep.value);
+          fieldsUpdated++;
+        }
       }
-      if (result.analysis.uniqueSellingPoints?.value?.length && isEmpty(populated.uniqueSellingPoints)) {
-        populated.uniqueSellingPoints = result.analysis.uniqueSellingPoints.value;
-        fieldsAdded++;
+      const uspDeep = (result.analysis as any).uniqueSellingPoints;
+      if (uspDeep?.value?.length) {
+        const conf = uspDeep.confidence ?? 0;
+        if (isEmpty(populated.uniqueSellingPoints)) {
+          populated.uniqueSellingPoints = uspDeep.value;
+          fieldsAdded++;
+        } else if (conf >= HIGH_CONFIDENCE) {
+          populated.uniqueSellingPoints = uspDeep.value;
+          fieldsUpdated++;
+        }
       }
-      if (result.analysis.phone?.value && (result.analysis.phone.confidence || 0) > 0) setIfEmpty('phone', result.analysis.phone.value);
-      if (result.analysis.businessEmail?.value && (result.analysis.businessEmail.confidence || 0) > 0) setIfEmpty('businessEmail', result.analysis.businessEmail.value);
-      if (result.analysis.address?.value && (result.analysis.address.confidence || 0) > 0) setIfEmpty('address', result.analysis.address.value);
+      if (result.analysis.phone?.value && (result.analysis.phone.confidence || 0) > 0) mergeField('phone', result.analysis.phone.value, result.analysis.phone.confidence ?? 0);
+      if (result.analysis.businessEmail?.value && (result.analysis.businessEmail.confidence || 0) > 0) mergeField('businessEmail', result.analysis.businessEmail.value, result.analysis.businessEmail.confidence ?? 0);
+      if (result.analysis.address?.value && (result.analysis.address.confidence || 0) > 0) mergeField('address', result.analysis.address.value, result.analysis.address.confidence ?? 0);
 
       if (result.analysis.socialLinks) {
         const discovered = result.analysis.socialLinks;
@@ -443,7 +483,7 @@ const ProfilePage: React.FC = () => {
         .eq('id', user.id);
       if (refreshProfile) await refreshProfile();
 
-      setEnrichmentFieldsAdded(fieldsAdded);
+      setEnrichmentFieldsAdded(fieldsAdded + fieldsUpdated);
       setEnrichmentStatus('complete');
       // Auto-dismiss the success banner after a short read window
       setTimeout(() => {
