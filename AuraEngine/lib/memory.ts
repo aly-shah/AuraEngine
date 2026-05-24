@@ -47,17 +47,32 @@ export async function resolveWorkspaceForUser(userId: string): Promise<string | 
  * Optional `name` sets the display name on first creation; subsequent calls
  * return the existing workspace unchanged. Clears the in-memory cache so
  * the next resolveWorkspaceForUser() call hits the DB.
+ *
+ * Wrapped in a 10s timeout via Promise.race so the UI never spins forever
+ * if Supabase / network is unhealthy. Logs both the raw rpc result and any
+ * timeout to console for in-the-browser diagnosis.
  */
 export async function createMyWorkspace(
   userId: string,
   name?: string,
 ): Promise<{ workspaceId: string; created: boolean; name: string }> {
-  const { data, error } = await supabase.rpc('create_my_workspace', {
-    p_name: name?.trim() || null,
+  const trimmed = name?.trim();
+  console.log('[createMyWorkspace] calling rpc with', { p_name: trimmed || null });
+
+  const rpcCall = supabase.rpc('create_my_workspace', {
+    p_name: trimmed || null,
   });
-  if (error) throw new Error(error.message);
+
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('create_my_workspace timed out after 10s')), 10_000),
+  );
+
+  const { data, error } = (await Promise.race([rpcCall, timeout])) as Awaited<typeof rpcCall>;
+  console.log('[createMyWorkspace] rpc returned', { data, error });
+
+  if (error) throw new Error(`${error.code ?? ''} ${error.message}`.trim());
   const row = Array.isArray(data) ? data[0] : data;
-  if (!row?.workspace_id) throw new Error('create_my_workspace returned no workspace_id');
+  if (!row?.workspace_id) throw new Error('RPC returned no workspace_id (data=' + JSON.stringify(data) + ')');
   _wsCache.delete(userId);
   return {
     workspaceId: row.workspace_id as string,

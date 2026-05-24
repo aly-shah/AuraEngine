@@ -104,13 +104,13 @@ const QuickLaunchPage: React.FC = () => {
     setCreatingWs(true); setCreateWsError(null); setCreatedWsName(null);
     try {
       const result = await createMyWorkspace(user.id, wsName);
-      await refetchWorkspace();
-      // Existing-mode lead query is keyed on workspaceId; invalidate so it
-      // re-fires with the new value once the workspace query settles.
+      // Don't await refetch — if it hangs, the success card still renders.
+      refetchWorkspace().catch((err) => console.warn('[quick-launch] refetchWorkspace failed:', err));
       qc.invalidateQueries({ queryKey: ['quick-launch-leads'] });
       setCreatedWsName(result.name);
     } catch (err) {
-      setCreateWsError((err as Error).message);
+      console.error('[quick-launch] create workspace failed:', err);
+      setCreateWsError((err as Error).message ?? String(err));
     } finally {
       setCreatingWs(false);
     }
