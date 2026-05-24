@@ -542,6 +542,14 @@ const QuickLaunchPage: React.FC = () => {
         {/* Existing mode: selectable recipient list */}
         {mode === 'existing' && existingEmailable.length > 0 && (
           <div className="mt-4 space-y-1.5">
+            {steps.length === 0 && (
+              <div className="flex items-start gap-2 text-[11px] bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-lg p-2">
+                <Sparkles size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  Tip: scroll down to <span className="font-semibold">Step 3</span> and click <span className="font-semibold">Generate sequence</span>. Then come back here and click <span className="font-semibold">Preview</span> on any lead to see the AI-personalized email for that prospect before launching.
+                </span>
+              </div>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                 Recipients · <span className="text-slate-900">{selectedIds.size}</span> of {existingEmailable.length} selected
@@ -586,11 +594,10 @@ const QuickLaunchPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); openPreview(l); }}
-                        disabled={steps.length === 0}
-                        title={steps.length === 0 ? 'Generate the sequence first (Step 3) to preview' : 'Preview the AI-personalized email for this lead'}
-                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Preview the AI-personalized email for this lead"
+                        className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100"
                       >
-                        <Eye size={11} /> Preview
+                        <Eye size={12} /> Preview
                       </button>
                     </div>
                   );
